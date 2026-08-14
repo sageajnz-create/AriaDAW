@@ -1,0 +1,10 @@
+{
+    "lm_model": "acestep-5Hz-lm-1.7B-Q8_0.gguf",
+    "synth_model": "acestep-v15-turbo-Q8_0.gguf",
+    "caption": "Warm indie folk with fingerpicked acoustic guitar, soft brushed drums, gentle upright bass, and a tender female lead vocal. Intimate late-night bedroom recording feel, subtle room reverb, hopeful and bittersweet.",
+    "duration": 60,
+    "vocal_language": "en",
+    "inference_steps": 8,
+    "guidance_scale": 1.0,
+    "shift": 3.0
+}

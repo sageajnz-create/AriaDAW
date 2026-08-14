@@ -87,8 +87,38 @@ codes), `POST /synth` (codes → MP3/WAV), `POST /understand` (audio → metadat
 `POST /vae`, `GET /health`, `GET /props`.
 
 Native task types: `text2music`, `cover`, `repaint`, `lego`, `extract`, `complete`.
-Repaint and extend are therefore native. **Stem separation is not**, so stems use
-**Demucs** (MIT) as an optional sidecar.
+
+**Stem separation is native after all — Demucs is not needed.** `extract` isolates a
+stem from a mix and supports **twelve** track types (`vocals`, `backing_vocals`,
+`drums`, `bass`, `guitar`, `keyboard`, `percussion`, `strings`, `synth`, `fx`, `brass`,
+`woodwinds`) against Demucs' four. That removes the Python sidecar entirely: one
+engine, one language, no extra runtime for users to install.
+
+Two corrections from reading the engine docs closely:
+
+- **`complete` is not temporal extend.** It generates a full mix from an isolated stem
+  (a cappella → full song) and explicitly "does NOT splice or extend temporally."
+  Real extend is **`repaint` with `repainting_start < 0` or `end` beyond source
+  duration** — i.e. outpainting.
+- **`lego`, `extract`, and `complete` require the Base/SFT DiT, not turbo.** Turbo only
+  covers `text2music`, `cover`, and `repaint`.
+
+| Feature | Task | DiT required | Steps |
+|---|---|---|---|
+| Generate a song | `text2music` | turbo ✅ | 8 |
+| Cover / restyle | `cover` | turbo ✅ | 8 |
+| Regenerate a section | `repaint` | turbo ✅ | 8 |
+| Extend a track | `repaint` (outpaint) | turbo ✅ | 8 |
+| Split into stems | `extract` | **SFT** | 50 |
+| Add an instrument layer | `lego` | **SFT** | 50 |
+| Stem → full mix | `complete` | **SFT** | 50 |
+
+So Aria ships both DiTs (~2.55 GB each). Turbo drives the fast interactive path; SFT
+loads only for stem-level work, where 50 steps cost ~6× turbo's time. The UI must set
+that expectation honestly rather than appearing to hang.
+
+`lego` deserves attention — adding a named instrument layer to existing audio is a
+genuinely DAW-shaped capability that Suno has no equivalent for.
 
 ### Library data model
 
