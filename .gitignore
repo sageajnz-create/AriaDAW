@@ -1,0 +1,31 @@
+# Engine is vendored by scripts/setup.sh, not committed.
+# It's a build dependency (like node_modules), and the GGUF weights are ~5.6 GB.
+/engine/acestep.cpp/
+
+# Model weights — never commit these.
+*.gguf
+*.safetensors
+
+# Generated audio and user library
+/output/
+*.wav
+*.mp3
+*.flac
+
+# Rust / Tauri
+/src-tauri/target/
+/src-tauri/gen/
+
+# Node
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Editor / OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+.DS_Store
+.directory
+*.swp
