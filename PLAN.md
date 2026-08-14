@@ -157,11 +157,52 @@ cage. Delete Aria and your music is still there, as ordinary files.
 
 ## Build phases
 
-### Phase 0 — Engine spike *(de-risk before any UI)*
-Build acestep.cpp with Vulkan, fetch the Light tier, generate one song from the CLI on
-the 6650 XT, measure seconds-per-song.
-**Gate:** if Vulkan/RADV misbehaves, fall back to CPU and re-scope timings honestly.
-Nothing else is worth building until this works.
+### Phase 0 — Engine spike ✅ **PASSED** *(2026-08-15)*
+
+Built acestep.cpp with Vulkan on the RX 6650 XT and generated a complete 60-second
+indie-folk track with sung vocals. Verified real audio: 5,746,176 samples,
+mean −15.2 dB, peak 0.0 dB, 48 kHz stereo.
+
+**Measured on the 6650 XT (60s song, turbo, 8 steps):**
+
+| Stage | Time |
+|---|---|
+| LM — lyrics, metadata, 299 audio codes | 8.3 s (86 tok/s) |
+| DiT — 8 steps, 1937-node graph | 2.2 s |
+| VAE decode — 8 tiles | 4.2 s |
+| MP3 encode | 1.0 s (58× realtime) |
+| **Total** | **≈ 17 s** |
+
+**This is interactive speed.** ~17 s for a full minute of music means generation can
+feel immediate — the UI does *not* need to be queue-first. Jobs still run in the
+background and stay cancellable, but the design target is "watch it appear", not
+"come back later". Peak VRAM stayed under 2 GB, so the 8 GB budget is generous and
+the XL tier is plausible later.
+
+#### Critical finding: the default VAE chunk hangs RADV
+
+At the stock `--vae-chunk 1024`, VAE decode built a 479-node graph over 960 latent
+frames and **lost the GPU device**:
+
+```
+radv/amdgpu: The CS has been cancelled because the context is lost.
+terminate called after throwing an instance of 'vk::DeviceLostError'
+```
+
+The kernel runs long enough to trip RADV's watchdog. `--vae-chunk 256 --vae-overlap 32`
+splits it into 8 short tiles and succeeds, costing only ~4.2 s. The GPU hard-recovered
+both times with no lasting harm.
+
+**Product requirements this creates:**
+
+1. Ship a **conservative VAE chunk by default on Vulkan/RADV** — never the upstream 1024.
+2. **Auto-tune on first run**: probe a decode, and on `DeviceLost` halve the chunk and
+   retry. Store the working value per machine.
+3. **Never surface a device-lost crash to the user.** Catch it, retry smaller, and if it
+   still fails, fall back to CPU decode with an honest message.
+
+A user whose first song crashes their GPU driver never opens the app again. This single
+finding justifies the whole phase-0 gate.
 
 ### Phase 1 — Skeleton + core loop
 Tauri shell, engine supervisor, first-run model download with VRAM detection,
