@@ -68,6 +68,37 @@ fn now_secs() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
 }
 
+/// The language songs should be sung in when the user hasn't picked one.
+///
+/// Left unset, the engine's expansion step *invents* a language, and on an
+/// unusual prompt it wanders — an English prompt about reggae came back sung in
+/// Hindi. Singing in 50+ languages is a feature; picking one at random is not.
+/// Defaulting to the user's own locale is the least surprising behaviour, and
+/// the UI still lets them choose any language deliberately.
+fn default_vocal_language() -> String {
+    let raw = std::env::var("LC_ALL")
+        .or_else(|_| std::env::var("LC_MESSAGES"))
+        .or_else(|_| std::env::var("LANG"))
+        .unwrap_or_default();
+    parse_locale(&raw)
+}
+
+/// "en_NZ.UTF-8" -> "en". Falls back to English for `C`, `POSIX`, or anything
+/// that isn't a two-letter code.
+fn parse_locale(raw: &str) -> String {
+    let code = raw
+        .split(['_', '.', '@'])
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
+    if code.len() == 2 && code.chars().all(|c| c.is_ascii_alphabetic()) {
+        code
+    } else {
+        "en".to_string()
+    }
+}
+
 // ---------------------------------------------------------------- settings io
 
 fn load_settings(path: &PathBuf) -> EngineSettings {
@@ -286,9 +317,12 @@ fn attempt_generation(
     if let Some(k) = &opts.keyscale {
         req["keyscale"] = json!(k);
     }
-    if let Some(l) = &opts.vocal_language {
-        req["vocal_language"] = json!(l);
-    }
+    // Always send a language. Omitting it lets the model choose one at random.
+    req["vocal_language"] = json!(opts
+        .vocal_language
+        .clone()
+        .filter(|l| !l.trim().is_empty())
+        .unwrap_or_else(default_vocal_language));
     if let Some(s) = opts.seed {
         req["seed"] = json!(s);
     }
@@ -417,9 +451,37 @@ pub fn run() {
             rename_track,
             delete_track,
             library_folder,
+            languages,
+            default_language,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Aria");
+}
+
+/// Languages the UI offers. ACE-Step supports 50+; these are the common ones,
+/// and the field accepts any code the engine knows.
+#[tauri::command]
+fn languages() -> Vec<(String, String)> {
+    [
+        ("en", "English"), ("es", "Spanish"), ("fr", "French"), ("de", "German"),
+        ("it", "Italian"), ("pt", "Portuguese"), ("nl", "Dutch"), ("pl", "Polish"),
+        ("ru", "Russian"), ("uk", "Ukrainian"), ("tr", "Turkish"), ("ar", "Arabic"),
+        ("he", "Hebrew"), ("hi", "Hindi"), ("bn", "Bengali"), ("ta", "Tamil"),
+        ("ur", "Urdu"), ("fa", "Persian"), ("zh", "Chinese"), ("ja", "Japanese"),
+        ("ko", "Korean"), ("vi", "Vietnamese"), ("th", "Thai"), ("id", "Indonesian"),
+        ("ms", "Malay"), ("tl", "Filipino"), ("sw", "Swahili"), ("yo", "Yoruba"),
+        ("zu", "Zulu"), ("af", "Afrikaans"), ("el", "Greek"), ("sv", "Swedish"),
+        ("no", "Norwegian"), ("da", "Danish"), ("fi", "Finnish"), ("cs", "Czech"),
+        ("hu", "Hungarian"), ("ro", "Romanian"), ("mi", "Māori"),
+    ]
+    .iter()
+    .map(|(c, n)| (c.to_string(), n.to_string()))
+    .collect()
+}
+
+#[tauri::command]
+fn default_language() -> String {
+    default_vocal_language()
 }
 
 #[cfg(test)]
@@ -434,5 +496,18 @@ mod tests {
             title_from("dreamy lo-fi hip hop, mellow rhodes piano, soft vinyl"),
             "Dreamy lo-fi hip hop, mellow rhodes"
         );
+    }
+
+    #[test]
+    fn derives_language_from_locale() {
+        use super::parse_locale;
+        assert_eq!(parse_locale("en_NZ.UTF-8"), "en");
+        assert_eq!(parse_locale("fr_FR@euro"), "fr");
+        assert_eq!(parse_locale("pt_BR"), "pt");
+        assert_eq!(parse_locale("ja"), "ja");
+        // Anything unusable falls back to English rather than to "random".
+        assert_eq!(parse_locale("C"), "en");
+        assert_eq!(parse_locale("POSIX"), "en");
+        assert_eq!(parse_locale(""), "en");
     }
 }

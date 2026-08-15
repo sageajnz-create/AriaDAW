@@ -59,6 +59,21 @@ export const api = {
     if (!isDesktop) return "~/Music/Aria";
     return (await tauri()).invoke<string>("library_folder");
   },
+
+  languages: async (): Promise<Array<[string, string]>> => {
+    if (!isDesktop) {
+      return [
+        ["en", "English"], ["es", "Spanish"], ["fr", "French"],
+        ["hi", "Hindi"], ["ja", "Japanese"], ["mi", "Māori"],
+      ];
+    }
+    return (await tauri()).invoke<Array<[string, string]>>("languages");
+  },
+
+  defaultLanguage: async (): Promise<string> => {
+    if (!isDesktop) return "en";
+    return (await tauri()).invoke<string>("default_language");
+  },
 };
 
 /** Local file path -> a URL the webview may play. */

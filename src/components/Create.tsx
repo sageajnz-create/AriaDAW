@@ -21,12 +21,25 @@ export default function Create({ onCreated, engineReady }: Props) {
   const [prompt, setPrompt] = useState("");
   const [instrumental, setInstrumental] = useState(false);
   const [duration, setDuration] = useState(60);
+  const [language, setLanguage] = useState("en");
+  const [languages, setLanguages] = useState<Array<[string, string]>>([]);
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState<string | null>(null);
   const [detail, setDetail] = useState("");
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const jobRef = useRef<string | null>(null);
+
+  // Seed the language picker from the user's locale. Without an explicit
+  // language the model invents one, which is how an English reggae prompt came
+  // back sung in Hindi.
+  useEffect(() => {
+    (async () => {
+      const [list, dflt] = await Promise.all([api.languages(), api.defaultLanguage()]);
+      setLanguages(list);
+      if (list.some(([code]) => code === dflt)) setLanguage(dflt);
+    })();
+  }, []);
 
   // Elapsed timer. Local generation takes as long as it takes, and showing real
   // seconds is more honest than animating a progress bar we can't predict.
@@ -101,6 +114,7 @@ export default function Create({ onCreated, engineReady }: Props) {
         prompt: prompt.trim(),
         instrumental,
         duration,
+        vocal_language: language,
       });
     } catch (err) {
       setBusy(false);
@@ -149,6 +163,29 @@ export default function Create({ onCreated, engineReady }: Props) {
             aria-valuetext={formatMinutes(duration)}
           />
         </div>
+
+        {!instrumental && (
+          <div className="field">
+            <label htmlFor="language">What language should it be sung in?</label>
+            <select
+              id="language"
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              disabled={busy}
+              aria-describedby="language-hint"
+            >
+              {languages.map(([code, name]) => (
+                <option key={code} value={code}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <p className="hint" id="language-hint">
+              Aria can sing in over 50 languages. This starts on your computer's
+              language — change it any time.
+            </p>
+          </div>
+        )}
 
         <div className="field">
           <label className="check" htmlFor="instrumental">
