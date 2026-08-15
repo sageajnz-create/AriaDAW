@@ -28,6 +28,15 @@ fn main() {
         if wayland && std::env::var_os("ARIA_KEEP_WAYLAND").is_none() {
             std::env::set_var("GDK_BACKEND", "x11");
         }
+
+        // Accelerated compositing is what drops the backing surface when the
+        // window is hidden and fails to restore it — the window comes back
+        // grey after you switch away. Aria's UI is text and a few controls, so
+        // there is nothing to gain from compositing it on the GPU, and the GPU
+        // is busy generating music anyway.
+        if std::env::var_os("WEBKIT_DISABLE_COMPOSITING_MODE").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_COMPOSITING_MODE", "1");
+        }
     }
 
     aria_lib::run()
