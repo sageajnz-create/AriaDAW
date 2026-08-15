@@ -219,6 +219,106 @@ fn library_folder(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     Ok(state.library.lock().unwrap().audio_dir.display().to_string())
 }
 
+/// Bring an existing recording into the library.
+///
+/// This is the thing Suno's free tier will not do at all. Once a song is in,
+/// every derived operation works on it — pull the drums out of a demo, restyle
+/// a voice memo, extend a loop you made years ago. The engine analyses it for
+/// tempo, key, a description of how it sounds, and any lyrics it can hear.
+#[tauri::command]
+fn import_audio(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    path: String,
+) -> Result<String, String> {
+    let job_id = uuid::Uuid::new_v4().to_string();
+    let st = Arc::clone(&state);
+    let jid = job_id.clone();
+
+    std::thread::spawn(move || {
+        if let Err(e) = run_import(&app, &st, &jid, &path) {
+            let _ = app.emit("gen:error", json!({ "job_id": jid, "message": e.to_string() }));
+        }
+    });
+    Ok(job_id)
+}
+
+fn run_import(
+    app: &AppHandle,
+    st: &Arc<AppState>,
+    job_id: &str,
+    source_path: &str,
+) -> anyhow::Result<()> {
+    let src = std::path::Path::new(source_path);
+    let name = src
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "Imported song".into());
+
+    let audio = std::fs::read(src)
+        .map_err(|e| anyhow::anyhow!("could not read {}: {e}", src.display()))?;
+
+    {
+        let mut eng = st.engine.lock().unwrap();
+        if eng.state() != EngineState::Ready || eng.has_died() {
+            emit_stage(app, job_id, "starting", "Waking the engine");
+            eng.restart()?;
+        }
+    }
+    let ace = AceClient::new(st.engine.lock().unwrap().base_url())?;
+
+    emit_stage(app, job_id, "composing", "Listening to your song");
+    let filename = src
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| "audio".into());
+    let job = ace.submit_understand(audio.clone(), &filename)?;
+    wait_for(&ace, &job, app, job_id, "composing", "Listening to your song")?;
+    let (analysis, latent) = ace.understand_result(&job)?;
+
+    emit_stage(app, job_id, "saving", "Adding it to your library");
+    let id = uuid::Uuid::new_v4().to_string();
+    let lib = st.library.lock().unwrap();
+
+    // Copy rather than reference: the library owns its files, and the original
+    // stays exactly where the user put it.
+    let ext = src.extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_else(|| "mp3".into());
+    let audio_path = lib.audio_dir.join(format!("{id}.{ext}"));
+    std::fs::write(&audio_path, &audio)?;
+    let latent_path = latent.as_ref().and_then(|l| {
+        let p = lib.audio_dir.join(format!("{id}.latent"));
+        std::fs::write(&p, l).ok().map(|_| p.display().to_string())
+    });
+
+    let track = Track {
+        id,
+        title: name,
+        prompt: String::new(),
+        caption: analysis.get("caption").and_then(Value::as_str).unwrap_or_default().to_string(),
+        lyrics: analysis.get("lyrics").and_then(Value::as_str).unwrap_or_default().to_string(),
+        bpm: analysis.get("bpm").and_then(Value::as_i64),
+        keyscale: analysis.get("keyscale").and_then(Value::as_str).map(String::from),
+        timesignature: analysis.get("timesignature").and_then(Value::as_str).map(String::from),
+        vocal_language: analysis.get("vocal_language").and_then(Value::as_str).map(String::from),
+        duration: analysis.get("duration").and_then(Value::as_f64).unwrap_or(0.0),
+        seed: None,
+        model: String::new(),
+        audio_path: audio_path.display().to_string(),
+        latent_path,
+        created_at: now_secs(),
+        parent_id: None,
+        operation: Some("imported".into()),
+        favorite: false,
+        lyricist: None,
+        missing: false,
+    };
+    lib.insert(&track)?;
+    drop(lib);
+
+    let _ = app.emit("gen:done", json!({ "job_id": job_id, "track": track }));
+    Ok(())
+}
+
 /// Where the webview should fetch audio from.
 #[tauri::command]
 fn audio_base_url(state: State<'_, Arc<AppState>>) -> String {
@@ -822,6 +922,7 @@ pub fn run() {
             stem_choices,
             derive_track,
             audio_base_url,
+            import_audio,
             log_ui_error,
         ])
         .run(tauri::generate_context!())

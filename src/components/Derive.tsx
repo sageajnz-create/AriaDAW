@@ -5,7 +5,14 @@ import type { StemChoice, Track } from "../types";
 /** Things you can make from a song you already have.
  *  Suno charges for stem separation and section editing; here they're just
  *  part of the app. */
-type Panel = "stems" | "extend" | "cover" | null;
+type Panel = "stems" | "extend" | "cover" | "section" | null;
+
+/** mm:ss for the section editor, where seconds matter. */
+function clock(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
 
 interface Props {
   track: Track;
@@ -20,6 +27,9 @@ export default function Derive({ track, supportsStems, busy, onStarted }: Props)
   const [stem, setStem] = useState("vocals");
   const [extendBy, setExtendBy] = useState(30);
   const [coverStyle, setCoverStyle] = useState("");
+  const [secStart, setSecStart] = useState(0);
+  const [secEnd, setSecEnd] = useState(Math.min(15, Math.floor(track.duration)));
+  const [secStyle, setSecStyle] = useState("");
 
   useEffect(() => {
     if (panel === "stems" && stems.length === 0) {
@@ -71,7 +81,88 @@ export default function Derive({ track, supportsStems, busy, onStarted }: Props)
         >
           Change the style
         </button>
+        <button
+          type="button"
+          className="btn btn-icon"
+          onClick={() => setPanel(panel === "section" ? null : "section")}
+          aria-expanded={panel === "section"}
+          disabled={busy}
+          title="Regenerate just one part, keeping the rest"
+        >
+          Redo a section
+        </button>
       </div>
+
+      {panel === "section" && (
+        <div className="derive-panel">
+          <p className="hint" style={{ marginTop: 0 }}>
+            Keeps the whole song and rewrites only the part you choose — handy when
+            one verse doesn't land but the rest does.
+          </p>
+          <div className="grid-2">
+            <div className="field">
+              <label htmlFor={`s0-${track.id}`}>Start at {clock(secStart)}</label>
+              <input
+                id={`s0-${track.id}`}
+                type="range"
+                min={0}
+                max={Math.max(1, Math.floor(track.duration) - 1)}
+                step={1}
+                value={secStart}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setSecStart(v);
+                  if (v >= secEnd) setSecEnd(Math.min(Math.floor(track.duration), v + 5));
+                }}
+                disabled={busy}
+                aria-valuetext={clock(secStart)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor={`s1-${track.id}`}>End at {clock(secEnd)}</label>
+              <input
+                id={`s1-${track.id}`}
+                type="range"
+                min={1}
+                max={Math.max(2, Math.floor(track.duration))}
+                step={1}
+                value={secEnd}
+                onChange={(e) => setSecEnd(Math.max(secStart + 1, Number(e.target.value)))}
+                disabled={busy}
+                aria-valuetext={clock(secEnd)}
+              />
+            </div>
+          </div>
+          <div className="field">
+            <label htmlFor={`ss-${track.id}`}>
+              How should that part sound? (optional)
+            </label>
+            <input
+              id={`ss-${track.id}`}
+              type="text"
+              value={secStyle}
+              onChange={(e) => setSecStyle(e.target.value)}
+              placeholder="quieter, just piano and voice"
+              disabled={busy}
+            />
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() =>
+              run({
+                kind: "repaint",
+                start: secStart,
+                end: secEnd,
+                caption: secStyle.trim() || null,
+              })
+            }
+            disabled={busy || secEnd <= secStart}
+          >
+            Redo {clock(secStart)}–{clock(secEnd)}
+          </button>
+        </div>
+      )}
 
       {panel === "stems" && (
         <div className="derive-panel">

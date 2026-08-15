@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Create from "./components/Create";
 import LibraryView from "./components/Library";
-import { api, loadAudioBase, onEvent, openFolder } from "./api";
+import { api, loadAudioBase, onEvent, openFolder, pickAudioFile } from "./api";
 import { isDesktop } from "./preview";
 import type { EngineStatus, Track } from "./types";
 
@@ -16,6 +16,23 @@ export default function App() {
   const [canPlayAudio, setCanPlayAudio] = useState(true);
   // A derived track is being made; the library disables its controls meanwhile.
   const [deriving, setDeriving] = useState(false);
+  const [importing, setImporting] = useState(false);
+
+  // Bringing in your own recording unlocks every derived operation on it —
+  // stems from a demo, a restyle of a voice memo. Suno's free tier has no
+  // equivalent.
+  const importSong = useCallback(async () => {
+    const path = await pickAudioFile();
+    if (!path) return;
+    setImporting(true);
+    try {
+      await api.importAudio(path);
+      setTab("library");
+    } catch (e) {
+      setBootError(`Could not bring that song in: ${e}`);
+      setImporting(false);
+    }
+  }, []);
 
   const refreshTracks = useCallback(async () => {
     try {
@@ -61,10 +78,12 @@ export default function App() {
     const offs = [
       onEvent<{ track: Track }>("gen:done", () => {
         setDeriving(false);
+        setImporting(false);
         refreshTracks();
       }),
       onEvent<{ message: string }>("gen:error", (p) => {
         setDeriving(false);
+        setImporting(false);
         setBootError(p.message);
       }),
     ];
@@ -95,6 +114,14 @@ export default function App() {
           </h1>
           <p className="tagline">Your music. Your machine. No limits.</p>
           <div className="masthead-actions">
+            <button
+              type="button"
+              className="btn btn-icon"
+              onClick={importSong}
+              disabled={importing || !ready}
+            >
+              {importing ? "Bringing it in…" : "Add my own song"}
+            </button>
             <button
               type="button"
               className="btn btn-icon"

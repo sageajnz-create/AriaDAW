@@ -92,6 +92,12 @@ export const api = {
     return (await tauri()).invoke<string>("derive_track", { id, operation });
   },
 
+  /** Bring an existing recording in. Suno's free tier can't do this at all. */
+  importAudio: async (path: string): Promise<string> => {
+    if (!isDesktop) return `preview-import-${Date.now()}`;
+    return (await tauri()).invoke<string>("import_audio", { path });
+  },
+
   audioOutputAvailable: async (): Promise<boolean> => {
     if (!isDesktop) return true;
     return (await tauri()).invoke<boolean>("audio_output_available");
@@ -117,6 +123,17 @@ export async function loadAudioBase(): Promise<void> {
 export function trackAudioUrl(id: string): string {
   if (!isDesktop || !audioBase) return "";
   return `${audioBase}/track/${encodeURIComponent(id)}`;
+}
+
+/** Ask for an audio file to import. Returns null if the user cancels. */
+export async function pickAudioFile(): Promise<string | null> {
+  if (!isDesktop) return null;
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const picked = await open({
+    multiple: false,
+    filters: [{ name: "Audio", extensions: ["mp3", "wav", "flac", "ogg", "m4a", "opus"] }],
+  });
+  return typeof picked === "string" ? picked : null;
 }
 
 /** Open the music folder in the system file manager. */

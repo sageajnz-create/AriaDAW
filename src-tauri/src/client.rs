@@ -194,6 +194,69 @@ impl AceClient {
         parse_multipart(&bytes)
     }
 
+    /// Analyse existing audio: tempo, key, a caption describing how it sounds,
+    /// the lyrics it can hear, and the latent for reuse.
+    pub fn submit_understand(&self, audio: Vec<u8>, filename: &str) -> Result<String> {
+        use reqwest::blocking::multipart::{Form, Part};
+        let form = Form::new().part(
+            "audio",
+            Part::bytes(audio)
+                .file_name(filename.to_string())
+                .mime_str("application/octet-stream")?,
+        );
+        let resp = self
+            .http
+            .post(format!("{}/understand", self.base))
+            .multipart(form)
+            .send()
+            .context("submitting understand job")?;
+        if !resp.status().is_success() {
+            return Err(anyhow!("the engine could not read that file: {}", resp.status()));
+        }
+        let v: Value = resp.json()?;
+        v.get("id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| anyhow!("understand did not return a job id"))
+    }
+
+    /// Result of `/understand`: one JSON part plus the source latent.
+    pub fn understand_result(&self, id: &str) -> Result<(Value, Option<Vec<u8>>)> {
+        let bytes = self
+            .http
+            .get(format!("{}/job?id={id}&result=1", self.base))
+            .send()?
+            .bytes()?
+            .to_vec();
+
+        let mut json_part: Option<Value> = None;
+        let mut latent: Option<Vec<u8>> = None;
+        for part in split_on(&bytes, BOUNDARY) {
+            let Some(hdr_end) = find(part, b"\r\n\r\n") else { continue };
+            let headers = String::from_utf8_lossy(&part[..hdr_end]).to_ascii_lowercase();
+            let mut body = &part[hdr_end + 4..];
+            if body.ends_with(b"\r\n") {
+                body = &body[..body.len() - 2];
+            }
+            if body.is_empty() {
+                continue;
+            }
+            if headers.contains("application/json") {
+                let v: Value = serde_json::from_slice(body)?;
+                json_part = Some(match v {
+                    Value::Array(mut a) if !a.is_empty() => a.remove(0),
+                    other => other,
+                });
+            } else {
+                latent = Some(body.to_vec());
+            }
+        }
+        Ok((
+            json_part.ok_or_else(|| anyhow!("the engine returned no analysis"))?,
+            latent,
+        ))
+    }
+
     pub fn cancel(&self, id: &str) -> Result<()> {
         let _ = self
             .http
