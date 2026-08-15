@@ -36,6 +36,14 @@ pub struct Track {
     /// Which model wrote the words, when it wasn't the user or ACE-Step itself.
     #[serde(default)]
     pub lyricist: Option<String>,
+    /// True when the audio file is no longer where we left it.
+    ///
+    /// Not stored — computed on read. Aria deliberately keeps music as ordinary
+    /// files people are free to rename, move or delete, so the index going stale
+    /// is expected behaviour rather than corruption. Saying so plainly beats a
+    /// track that silently refuses to play.
+    #[serde(default)]
+    pub missing: bool,
 }
 
 pub struct Library {
@@ -166,6 +174,7 @@ impl Library {
 }
 
 fn row_to_track(r: &rusqlite::Row) -> rusqlite::Result<Track> {
+    let audio_path: String = r.get(12)?;
     Ok(Track {
         id: r.get(0)?,
         title: r.get(1)?,
@@ -179,13 +188,14 @@ fn row_to_track(r: &rusqlite::Row) -> rusqlite::Result<Track> {
         duration: r.get(9)?,
         seed: r.get(10)?,
         model: r.get(11)?,
-        audio_path: r.get(12)?,
+        audio_path: audio_path.clone(),
         latent_path: r.get(13)?,
         created_at: r.get(14)?,
         parent_id: r.get(15)?,
         operation: r.get(16)?,
         favorite: r.get::<_, i32>(17)? != 0,
         lyricist: r.get(18)?,
+        missing: !std::path::Path::new(&audio_path).exists(),
     })
 }
 
@@ -214,6 +224,7 @@ mod tests {
             operation: None,
             favorite: false,
             lyricist: None,
+            missing: false,
         }
     }
 

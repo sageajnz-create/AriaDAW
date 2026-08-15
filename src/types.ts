@@ -17,6 +17,15 @@ export interface Track {
   parent_id: string | null;
   operation: string | null;
   favorite: boolean;
+  /** Which model wrote the words, if any. */
+  lyricist?: string | null;
+  /** The audio file is no longer where Aria left it. */
+  missing?: boolean;
+}
+
+export interface StemChoice {
+  id: string;
+  name: string;
 }
 
 export interface AvailableModels {

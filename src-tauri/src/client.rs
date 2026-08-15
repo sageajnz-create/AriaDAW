@@ -93,6 +93,57 @@ impl AceClient {
         self.submit("synth", req)
     }
 
+    /// Submit a synth job that works from existing audio — cover, repaint,
+    /// extend, stem extraction.
+    ///
+    /// Prefers the cached latent over the audio file when we have one: the
+    /// engine hands back the latent it produced for every track, and replaying
+    /// it skips a VAE encode entirely.
+    pub fn submit_synth_with_source(
+        &self,
+        req: &Value,
+        audio: Option<Vec<u8>>,
+        latent: Option<Vec<u8>>,
+    ) -> Result<String> {
+        use reqwest::blocking::multipart::{Form, Part};
+
+        let mut form = Form::new().part(
+            "request",
+            Part::bytes(serde_json::to_vec(req)?)
+                .file_name("request.json")
+                .mime_str("application/json")?,
+        );
+
+        form = match (latent, audio) {
+            (Some(l), _) => form.part(
+                "src_latents",
+                Part::bytes(l)
+                    .file_name("source.latent")
+                    .mime_str("application/octet-stream")?,
+            ),
+            (None, Some(a)) => form.part(
+                "audio",
+                Part::bytes(a).file_name("source.mp3").mime_str("audio/mpeg")?,
+            ),
+            (None, None) => return Err(anyhow!("this needs a source track")),
+        };
+
+        let resp = self
+            .http
+            .post(format!("{}/synth", self.base))
+            .multipart(form)
+            .send()
+            .context("submitting synth job with source audio")?;
+        if !resp.status().is_success() {
+            return Err(anyhow!("the engine rejected the request: {}", resp.status()));
+        }
+        let v: Value = resp.json()?;
+        v.get("id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| anyhow!("synth did not return a job id"))
+    }
+
     /// Poll a job. An empty or unreachable response means the engine died —
     /// on AMD that is usually a lost GPU device, so we surface it distinctly
     /// rather than as a generic failure.

@@ -1,6 +1,7 @@
 //! Aria — free, unlimited, local AI music creation.
 
 mod client;
+mod derive;
 mod engine;
 mod library;
 mod lyrics;
@@ -208,6 +209,186 @@ fn delete_track(state: State<'_, Arc<AppState>>, id: String) -> Result<(), Strin
 #[tauri::command]
 fn library_folder(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     Ok(state.library.lock().unwrap().audio_dir.display().to_string())
+}
+
+#[tauri::command]
+fn stem_choices() -> Vec<derive::StemChoice> {
+    derive::stem_choices()
+}
+
+/// Make a new track from an existing one: isolate a stem, restyle it, redo a
+/// section, or make it longer. Same event contract as `generate`.
+#[tauri::command]
+fn derive_track(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    operation: derive::Operation,
+) -> Result<String, String> {
+    let job_id = uuid::Uuid::new_v4().to_string();
+    let st = Arc::clone(&state);
+    let jid = job_id.clone();
+
+    std::thread::spawn(move || {
+        if let Err(e) = run_derive(&app, &st, &jid, &id, operation) {
+            let _ = app.emit("gen:error", json!({ "job_id": jid, "message": e.to_string() }));
+        }
+    });
+    Ok(job_id)
+}
+
+fn run_derive(
+    app: &AppHandle,
+    st: &Arc<AppState>,
+    job_id: &str,
+    source_id: &str,
+    op: derive::Operation,
+) -> anyhow::Result<()> {
+    {
+        let mut eng = st.engine.lock().unwrap();
+        if eng.state() != EngineState::Ready || eng.has_died() {
+            emit_stage(app, job_id, "starting", "Waking the engine");
+            eng.restart()?;
+        }
+    }
+    let ace = AceClient::new(st.engine.lock().unwrap().base_url())?;
+
+    let source = st
+        .library
+        .lock()
+        .unwrap()
+        .get(source_id)?
+        .ok_or_else(|| anyhow::anyhow!("that track is no longer in your library"))?;
+
+    let models = st.engine.lock().unwrap().paths.available_models()?;
+    let dit = if op.needs_sft() {
+        models.dit_sft.first().cloned().ok_or_else(|| {
+            anyhow::anyhow!(
+                "This needs the detailed sound model, which isn't installed yet."
+            )
+        })?
+    } else {
+        models
+            .dit_turbo
+            .first()
+            .cloned()
+            .or_else(|| models.dit_sft.first().cloned())
+            .ok_or_else(|| anyhow::anyhow!("no diffusion model installed"))?
+    };
+    // SFT-only tasks are 50-step; turbo tasks stay at 8.
+    let steps = if op.needs_sft() { 50 } else { 8 };
+
+    emit_stage(app, job_id, "rendering", &describe(&op));
+
+    let mut req = json!({
+        "synth_model": dit,
+        "task_type": op.task_type(),
+        "caption": source.caption,
+        "lyrics": source.lyrics,
+        "inference_steps": steps,
+        "guidance_scale": 1.0,
+        "shift": if op.needs_sft() { 1.0 } else { 3.0 },
+        "mp3_bitrate": 320,
+        "audio_codes": "",
+    });
+
+    match &op {
+        derive::Operation::Stem { track } => {
+            req["track"] = json!(track);
+            // Isolation shouldn't be steered by the original text.
+            req["lyrics"] = json!("");
+        }
+        derive::Operation::AddLayer { track, caption } => {
+            req["track"] = json!(track);
+            if let Some(c) = caption {
+                req["caption"] = json!(c);
+            }
+            req["lyrics"] = json!("[Instrumental]");
+        }
+        derive::Operation::Cover { caption, strength } => {
+            req["caption"] = json!(caption);
+            req["audio_cover_strength"] = json!(strength);
+        }
+        derive::Operation::Repaint { start, end, caption } => {
+            req["repainting_start"] = json!(start);
+            req["repainting_end"] = json!(end);
+            if let Some(c) = caption {
+                req["caption"] = json!(c);
+            }
+        }
+        derive::Operation::Extend { seconds } => {
+            // Outpainting: paint from the old end out to the new one.
+            req["repainting_start"] = json!(source.duration);
+            req["repainting_end"] = json!(source.duration + seconds);
+        }
+    }
+
+    // Replay the cached latent when we have it and skip a VAE encode.
+    let latent = source
+        .latent_path
+        .as_ref()
+        .and_then(|p| std::fs::read(p).ok());
+    let audio = if latent.is_none() { std::fs::read(&source.audio_path).ok() } else { None };
+
+    let job = ace.submit_synth_with_source(&req, audio, latent)?;
+    wait_for(&ace, &job, app, job_id, "rendering", &describe(&op))?;
+    let out = ace.synth_result(&job)?;
+
+    emit_stage(app, job_id, "saving", "Saving to your library");
+    let new_id = uuid::Uuid::new_v4().to_string();
+    let lib = st.library.lock().unwrap();
+    let audio_path = lib.audio_dir.join(format!("{new_id}.mp3"));
+    std::fs::write(&audio_path, &out.audio)?;
+    let latent_path = out.latent.as_ref().and_then(|l| {
+        let p = lib.audio_dir.join(format!("{new_id}.latent"));
+        std::fs::write(&p, l).ok().map(|_| p.display().to_string())
+    });
+
+    let track = Track {
+        id: new_id,
+        title: op.title_for(&source.title),
+        prompt: source.prompt.clone(),
+        caption: source.caption.clone(),
+        // A stem has no words of its own.
+        lyrics: if matches!(op, derive::Operation::Stem { .. }) {
+            String::new()
+        } else {
+            source.lyrics.clone()
+        },
+        bpm: source.bpm,
+        keyscale: source.keyscale.clone(),
+        timesignature: source.timesignature.clone(),
+        vocal_language: source.vocal_language.clone(),
+        duration: match &op {
+            derive::Operation::Extend { seconds } => source.duration + seconds,
+            _ => source.duration,
+        },
+        seed: None,
+        model: dit,
+        audio_path: audio_path.display().to_string(),
+        latent_path,
+        created_at: now_secs(),
+        parent_id: Some(source.id.clone()),
+        operation: Some(op.label()),
+        favorite: false,
+        lyricist: None,
+        missing: false,
+    };
+    lib.insert(&track)?;
+    drop(lib);
+
+    let _ = app.emit("gen:done", json!({ "job_id": job_id, "track": track }));
+    Ok(())
+}
+
+fn describe(op: &derive::Operation) -> String {
+    match op {
+        derive::Operation::Stem { .. } => "Separating the parts".into(),
+        derive::Operation::Cover { .. } => "Reimagining the song".into(),
+        derive::Operation::Repaint { .. } => "Redoing that section".into(),
+        derive::Operation::Extend { .. } => "Making it longer".into(),
+        derive::Operation::AddLayer { .. } => "Adding the new part".into(),
+    }
 }
 
 /// Kick off a generation. Returns immediately with a job id; progress arrives as
@@ -487,6 +668,7 @@ fn attempt_generation(
         operation: None,
         favorite: false,
         lyricist: lyricist.clone(),
+        missing: false,
     };
     lib.insert(&track)?;
     Ok(track)
@@ -577,6 +759,8 @@ pub fn run() {
             default_language,
             audio_output_available,
             open_library_folder,
+            stem_choices,
+            derive_track,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Aria");

@@ -1,14 +1,20 @@
 import { useState } from "react";
 import { api, formatDate, formatDuration, trackAudioUrl } from "../api";
 import { isDesktop } from "../preview";
+import Derive from "./Derive";
 import type { Track } from "../types";
 
 interface Props {
   tracks: Track[];
   onChanged: () => void;
+  supportsStems: boolean;
+  busy: boolean;
+  onDeriveStarted: (jobId: string) => void;
 }
 
-export default function Library({ tracks, onChanged }: Props) {
+export default function Library({
+  tracks, onChanged, supportsStems, busy, onDeriveStarted,
+}: Props) {
   const [openLyrics, setOpenLyrics] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [playError, setPlayError] = useState<Record<string, string>>({});
@@ -64,6 +70,15 @@ export default function Library({ tracks, onChanged }: Props) {
                   {" · "}
                   {formatDate(t.created_at)}
                 </p>
+                {t.operation && (
+                  <p className="track-lineage">
+                    {parentTitle(tracks, t.parent_id) ? (
+                      <>Made from <strong>{parentTitle(tracks, t.parent_id)}</strong> — {t.operation}</>
+                    ) : (
+                      <>{t.operation}</>
+                    )}
+                  </p>
+                )}
               </div>
 
               <div className="track-actions">
@@ -97,7 +112,16 @@ export default function Library({ tracks, onChanged }: Props) {
               </div>
             </div>
 
-            {src ? (
+            {t.missing ? (
+              <div className="notice notice-warn" style={{ marginTop: 12 }}>
+                <p>
+                  <strong>This song's file isn't where Aria left it</strong>
+                  It was renamed, moved or deleted outside the app. That's allowed —
+                  your music is yours — but Aria can't play it from here anymore.
+                  Delete removes this entry from the list.
+                </p>
+              </div>
+            ) : src ? (
               <>
                 <audio
                   controls
@@ -132,6 +156,13 @@ export default function Library({ tracks, onChanged }: Props) {
                 </p>
               )
             )}
+
+            <Derive
+              track={t}
+              supportsStems={supportsStems}
+              busy={busy}
+              onStarted={onDeriveStarted}
+            />
 
             {lyricsOpen && (
               <div className="lyrics" id={`lyrics-${t.id}`}>
@@ -171,4 +202,10 @@ export default function Library({ tracks, onChanged }: Props) {
       })}
     </ul>
   );
+}
+
+/** Title of the track this one was derived from, if it's still around. */
+function parentTitle(tracks: Track[], parentId: string | null): string | null {
+  if (!parentId) return null;
+  return tracks.find((t) => t.id === parentId)?.title ?? null;
 }

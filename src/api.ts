@@ -75,6 +75,23 @@ export const api = {
     return (await tauri()).invoke<string>("default_language");
   },
 
+  stemChoices: async (): Promise<import("./types").StemChoice[]> => {
+    if (!isDesktop) {
+      return [
+        { id: "vocals", name: "Vocals" },
+        { id: "drums", name: "Drums" },
+        { id: "bass", name: "Bass" },
+        { id: "guitar", name: "Guitar" },
+      ];
+    }
+    return (await tauri()).invoke("stem_choices");
+  },
+
+  deriveTrack: async (id: string, operation: Record<string, unknown>): Promise<string> => {
+    if (!isDesktop) return `preview-derive-${Date.now()}`;
+    return (await tauri()).invoke<string>("derive_track", { id, operation });
+  },
+
   audioOutputAvailable: async (): Promise<boolean> => {
     if (!isDesktop) return true;
     return (await tauri()).invoke<boolean>("audio_output_available");

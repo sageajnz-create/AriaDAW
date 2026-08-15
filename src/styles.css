@@ -394,6 +394,29 @@ input[type="range"]:hover::-moz-range-thumb { background: var(--accent-hot); }
 
 audio { width: 100%; margin-top: 13px; }
 
+/* Lineage: what this track was made from. The relationship is the point —
+   a stem of an extend of a cover stays connected to its source. */
+.track-lineage {
+  color: var(--accent);
+  font-size: 0.82rem;
+  margin: 5px 0 0;
+}
+.track-lineage strong { font-weight: 600; }
+
+/* --- derived work (stems, extend, cover) -------------------------------- */
+.derive { margin-top: 12px; }
+.derive .btn-row { gap: 8px; }
+
+.derive-panel {
+  margin-top: 12px;
+  padding: 16px 18px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.derive-panel .field { margin-bottom: 14px; }
+.derive-panel .btn-primary { padding: 10px 20px; font-size: 1rem; }
+
 .lyrics {
   margin: 12px 0 0;
   padding: 14px 16px;

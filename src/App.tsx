@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Create from "./components/Create";
 import LibraryView from "./components/Library";
-import { api, openFolder } from "./api";
+import { api, onEvent, openFolder } from "./api";
 import { isDesktop } from "./preview";
 import type { EngineStatus, Track } from "./types";
 
@@ -14,6 +14,8 @@ export default function App() {
   const [bootError, setBootError] = useState<string | null>(null);
   const [largeText, setLargeText] = useState(false);
   const [canPlayAudio, setCanPlayAudio] = useState(true);
+  // A derived track is being made; the library disables its controls meanwhile.
+  const [deriving, setDeriving] = useState(false);
 
   const refreshTracks = useCallback(async () => {
     try {
@@ -50,6 +52,24 @@ export default function App() {
   useEffect(() => {
     document.body.classList.toggle("text-large", largeText);
   }, [largeText]);
+
+  // Derived tracks finish on the same events as generation. Refresh the list
+  // and re-enable the library's controls when one lands.
+  useEffect(() => {
+    const offs = [
+      onEvent<{ track: Track }>("gen:done", () => {
+        setDeriving(false);
+        refreshTracks();
+      }),
+      onEvent<{ message: string }>("gen:error", (p) => {
+        setDeriving(false);
+        setBootError(p.message);
+      }),
+    ];
+    return () => {
+      offs.forEach((o) => o.then((f) => f()));
+    };
+  }, [refreshTracks]);
 
   const onCreated = useCallback(
     (t: Track) => {
@@ -147,7 +167,13 @@ export default function App() {
             </div>
           ) : (
             <div role="tabpanel" id="panel-library" aria-labelledby="tab-library">
-              <LibraryView tracks={tracks} onChanged={refreshTracks} />
+              <LibraryView
+                tracks={tracks}
+                onChanged={refreshTracks}
+                supportsStems={!!status?.supports_stems}
+                busy={deriving}
+                onDeriveStarted={() => setDeriving(true)}
+              />
             </div>
           )}
         </main>
