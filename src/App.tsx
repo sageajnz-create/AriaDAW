@@ -13,6 +13,7 @@ export default function App() {
   const [status, setStatus] = useState<EngineStatus | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
   const [largeText, setLargeText] = useState(false);
+  const [canPlayAudio, setCanPlayAudio] = useState(true);
 
   const refreshTracks = useCallback(async () => {
     try {
@@ -36,6 +37,7 @@ export default function App() {
     (async () => {
       await refreshStatus();
       await refreshTracks();
+      setCanPlayAudio(await api.audioOutputAvailable());
       try {
         await api.startEngine();
       } catch (e) {
@@ -113,6 +115,18 @@ export default function App() {
               <p>
                 <strong>Aria couldn't start its engine</strong>
                 {bootError}
+              </p>
+            </div>
+          )}
+
+          {!canPlayAudio && (
+            <div className="notice notice-warn">
+              <p>
+                <strong>Songs will play silently until one package is installed</strong>
+                Your system is missing the GStreamer plugin this app needs to send
+                sound to your speakers. Aria can still make music, and the files in
+                your music folder are fine — they just won't play inside this window.
+                Install <code>gst-plugins-good</code>, then restart Aria.
               </p>
             </div>
           )}

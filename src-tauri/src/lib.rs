@@ -465,6 +465,7 @@ pub fn run() {
             library_folder,
             languages,
             default_language,
+            audio_output_available,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Aria");
@@ -494,6 +495,39 @@ fn languages() -> Vec<(String, String)> {
 #[tauri::command]
 fn default_language() -> String {
     default_vocal_language()
+}
+
+/// Can the webview actually produce sound?
+///
+/// On Linux, WebKitGTK plays `<audio>` through GStreamer and needs the
+/// `autodetect` plugin (`gst-plugins-good`) to find an output. Without it the
+/// player controls appear and behave normally but stay completely silent, with
+/// nothing in the UI to explain why — the worst possible failure for a music
+/// app. Detect it up front and say so plainly.
+#[cfg(target_os = "linux")]
+#[tauri::command]
+fn audio_output_available() -> bool {
+    // libgstautodetect.so is what provides autoaudiosink.
+    let roots = [
+        "/usr/lib/gstreamer-1.0",
+        "/usr/lib64/gstreamer-1.0",
+        "/usr/lib/x86_64-linux-gnu/gstreamer-1.0",
+        "/usr/local/lib/gstreamer-1.0",
+    ];
+    if let Ok(extra) = std::env::var("GST_PLUGIN_PATH") {
+        if std::path::Path::new(&extra).join("libgstautodetect.so").exists() {
+            return true;
+        }
+    }
+    roots
+        .iter()
+        .any(|r| std::path::Path::new(r).join("libgstautodetect.so").exists())
+}
+
+#[cfg(not(target_os = "linux"))]
+#[tauri::command]
+fn audio_output_available() -> bool {
+    true
 }
 
 #[cfg(test)]

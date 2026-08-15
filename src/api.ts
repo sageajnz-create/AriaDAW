@@ -74,6 +74,11 @@ export const api = {
     if (!isDesktop) return "en";
     return (await tauri()).invoke<string>("default_language");
   },
+
+  audioOutputAvailable: async (): Promise<boolean> => {
+    if (!isDesktop) return true;
+    return (await tauri()).invoke<boolean>("audio_output_available");
+  },
 };
 
 /** Local file path -> a URL the webview may play. */

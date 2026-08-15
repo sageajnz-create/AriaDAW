@@ -40,6 +40,16 @@ no vendor runtime (ROCm/CUDA) to install. CPU-only also works, just slower.
 | RAM | 8 GB | 16 GB |
 | Disk | ~5 GB for models | ~10 GB |
 
+**Linux audio note:** playback inside the app goes through WebKitGTK, which needs
+GStreamer's `autodetect` plugin to find your speakers. Without it songs still
+generate correctly and the files are fine — they just play silently in the window.
+Aria detects this and tells you, but you can install it up front:
+
+```bash
+sudo pacman -S gst-plugins-good      # Arch / CachyOS
+sudo apt install gstreamer1.0-plugins-good   # Debian / Ubuntu
+```
+
 ## Status
 
 In active development. See [PLAN.md](PLAN.md) for the architecture and roadmap.
