@@ -76,6 +76,62 @@ impl LyricWriter {
         &self.model
     }
 
+    /// Expand a short style request into a detailed musical description.
+    ///
+    /// The engine can do this itself, but its version drifts: "a modern jazz
+    /// song" came back as "a theatrical art-pop track", having taken its cue
+    /// from the lyrics instead of the request. Doing it here lets us insist the
+    /// stated genre survives, while still giving the audio model the detailed
+    /// caption it works best from.
+    pub fn expand_style(&self, style: &str, language: &str, instrumental: bool) -> Result<String> {
+        let system = "You turn a short music request into one detailed paragraph \
+             describing how the track sounds. Output ONLY that paragraph.\n\
+             Rules:\n\
+             - The genre and mood the user asked for must survive exactly. Never \
+               substitute a different genre.\n\
+             - Add concrete detail: instruments, rhythm, texture, production, energy.\n\
+             - Describe sound only. Do not write lyrics or a title.\n\
+             - Two to four sentences.";
+
+        let voice = if instrumental {
+            "It is instrumental, with no singing.".to_string()
+        } else {
+            format!("It has vocals sung in {language}.")
+        };
+        let user = format!("Music request: {style}\n{voice}");
+
+        let body = json!({
+            "model": self.model,
+            "stream": false,
+            "keep_alive": 0,
+            "options": { "temperature": 0.7 },
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        });
+
+        let resp: Value = self
+            .http
+            .post(format!("{OLLAMA}/api/chat"))
+            .json(&body)
+            .send()?
+            .json()?;
+
+        let text = resp
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow!("style model returned no content"))?;
+
+        let cleaned = clean(text).replace('\n', " ");
+        if cleaned.trim().len() < 20 {
+            return Err(anyhow!("style expansion too short to be useful"));
+        }
+        // Keep the user's own words in front, so the request is never buried.
+        Ok(format!("{}. {}", style.trim_end_matches(['.', ' ']), cleaned.trim()))
+    }
+
     /// Write lyrics for a song. `language` is a human-readable name ("English").
     pub fn write(&self, subject: &str, language: &str, seconds: f64) -> Result<String> {
         // Roughly four sung lines per ten seconds, kept within sane bounds.

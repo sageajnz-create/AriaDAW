@@ -554,15 +554,27 @@ fn attempt_generation(
         .filter(|l| !l.trim().is_empty())
         .unwrap_or_else(default_vocal_language);
 
+    let user_wrote_lyrics = !opts.instrumental && !opts.lyrics.trim().is_empty();
     let mut lyrics = if opts.instrumental {
         "[Instrumental]".to_string()
     } else {
         opts.lyrics.trim().to_string()
     };
     let mut lyricist: Option<String> = None;
+    let mut expanded_style: Option<String> = None;
 
-    if lyrics.is_empty() {
-        if let Some(writer) = lyrics::LyricWriter::detect() {
+    if let Some(writer) = lyrics::LyricWriter::detect() {
+        // Expand the style request ourselves so the stated genre survives. The
+        // engine's own expansion took its cue from the lyrics instead of the
+        // request and turned "a modern jazz song" into "theatrical art-pop".
+        emit_stage(app, job_id, "writing", "Working out how it should sound");
+        if let Ok(style) =
+            writer.expand_style(&opts.prompt, &language_name(&language), opts.instrumental)
+        {
+            expanded_style = Some(style);
+        }
+
+        if lyrics.is_empty() {
             emit_stage(app, job_id, "writing", "Writing the words");
             match writer.write(&opts.prompt, &language_name(&language), opts.duration) {
                 Ok(text) => {
@@ -605,15 +617,15 @@ fn attempt_generation(
     // Only nudge language through the caption when ACE-Step is writing the
     // words itself. When we supply lyrics, the language is already settled and
     // the caption should stay purely about the music.
-    let caption = if needs_writer && !opts.instrumental {
-        format!(
+    let caption = match &expanded_style {
+        Some(style) => style.clone(),
+        None if needs_writer && !opts.instrumental => format!(
             "{}. Sung in {}, with {} lyrics.",
             opts.prompt.trim_end_matches(['.', ' ']),
             language_name(&language),
             language_name(&language)
-        )
-    } else {
-        opts.prompt.clone()
+        ),
+        None => opts.prompt.clone(),
     };
 
     let mut req = json!({
@@ -637,9 +649,13 @@ fn attempt_generation(
         // 0.45 gives nearly the best variety with none of the filler.
         "lm_temperature": opts.lyric_variety.unwrap_or(0.45),
     });
-    // See `embellish`: leaving expansion on lets the model's CoT override the
-    // requested language, so it stays off unless explicitly asked for.
-    req["use_cot_caption"] = json!(opts.embellish);
+    // Don't let the engine rewrite the caption when we already have a good one,
+    // or when the user wrote their own lyrics. In both cases someone has been
+    // deliberate about what they want, and the engine's rewrite drifts —
+    // "a modern jazz song" became "theatrical art-pop" on a track whose lyrics
+    // the user had written themselves.
+    let keep_caption = expanded_style.is_some() || user_wrote_lyrics;
+    req["use_cot_caption"] = json!(opts.embellish && !keep_caption);
     if let Some(b) = opts.bpm.filter(|b| *b > 0) {
         req["bpm"] = json!(b);
     }
@@ -858,7 +874,10 @@ fn serve_track(
 ) -> tauri::http::Response<Vec<u8>> {
     use tauri::http::{header, status::StatusCode, Response};
 
-    let not_found = || {
+    // Logged because a failure here surfaces in the UI only as "playback
+    // failed", with nothing to say why.
+    let deny = |why: &str| {
+        eprintln!("[aria://] {} -> {}", request.uri(), why);
         Response::builder()
             .status(StatusCode::NOT_FOUND)
             .body(Vec::new())
@@ -866,20 +885,23 @@ fn serve_track(
     };
 
     // aria://localhost/track/<id>
-    let id = match request.uri().path().strip_prefix("/track/") {
+    let raw_path = request.uri().path().to_string();
+    let id = match raw_path.strip_prefix("/track/") {
         Some(i) if !i.is_empty() => i.to_string(),
-        _ => return not_found(),
+        _ => return deny("path is not /track/<id>"),
     };
 
     let state = app.state::<Arc<AppState>>();
     let track = match state.library.lock().unwrap().get(&id) {
         Ok(Some(t)) => t,
-        _ => return not_found(),
+        Ok(None) => return deny("no track with that id"),
+        Err(e) => return deny(&format!("library lookup failed: {e}")),
     };
     let bytes = match std::fs::read(&track.audio_path) {
         Ok(b) => b,
-        Err(_) => return not_found(),
+        Err(e) => return deny(&format!("cannot read {}: {e}", track.audio_path)),
     };
+    eprintln!("[aria://] serving {} ({} bytes)", track.audio_path, bytes.len());
     let total = bytes.len() as u64;
 
     // Honour a single-range request; that is all a media element issues.
