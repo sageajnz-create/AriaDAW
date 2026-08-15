@@ -771,6 +771,8 @@ fn attempt_generation(
     let mut lyricist: Option<String> = None;
     let mut expanded_style: Option<String> = None;
 
+    let have_instruct_model = lyrics::LyricWriter::detect().is_some();
+
     if let Some(writer) = lyrics::LyricWriter::detect() {
         // Expand the style request ourselves so the stated genre survives. The
         // engine's own expansion took its cue from the lyrics instead of the
@@ -792,6 +794,60 @@ fn attempt_generation(
                 // Not fatal: fall through and let ACE-Step write them instead.
                 Err(e) => eprintln!("lyric model failed, falling back: {e}"),
             }
+        }
+    }
+
+    // No instruct model installed: fall back to ACE-Step's own writer, but
+    // don't accept whatever the first attempt produces.
+    //
+    // That writer is inconsistent rather than uniformly bad. Four runs of one
+    // prompt scored 0.05, 0.00, 0.69 and 0.03 — one was genuinely good and the
+    // rest were repetition or nothing. `lm_mode: "inspire"` returns lyrics
+    // without audio codes in 3-7s, which makes it affordable to ask a few times
+    // and keep the best. Most installs will not have Ollama, so this is the
+    // path most people actually get.
+    if lyrics.is_empty() && !have_instruct_model {
+        emit_stage(app, job_id, "writing", "Writing the words");
+        let lm_for_words = models
+            .best_lm()
+            .ok_or_else(|| anyhow::anyhow!("no language model installed"))?;
+
+        let mut best = String::new();
+        let mut best_score = 0.0f64;
+        for attempt in 0..4 {
+            let probe = json!({
+                "lm_model": lm_for_words,
+                "lm_mode": "inspire",
+                "caption": opts.prompt,
+                "duration": opts.duration,
+                "vocal_language": language,
+                "lm_temperature": opts.lyric_variety.unwrap_or(0.45),
+                "seed": now_secs().wrapping_mul(31).wrapping_add(attempt) & 0x7fff_ffff,
+            });
+            let Ok(id) = ace.submit_lm(&probe) else { break };
+            if wait_for(ace, &id, app, job_id, "writing", "Writing the words").is_err() {
+                break;
+            }
+            let Ok(results) = ace.lm_results(&id) else { break };
+            let text = results
+                .first()
+                .and_then(|r| r.get("lyrics"))
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+
+            let score = lyrics::score_lyrics(&text);
+            if score > best_score {
+                best_score = score;
+                best = text;
+            }
+            if best_score >= lyrics::GOOD_ENOUGH {
+                break;
+            }
+            emit_stage(app, job_id, "writing", "Trying different words");
+        }
+        if !best.trim().is_empty() {
+            lyrics = best;
         }
     }
 

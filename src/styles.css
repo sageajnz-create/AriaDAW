@@ -572,3 +572,21 @@ audio { width: 100%; margin-top: 13px; }
 .status-ready   { background: var(--ok); }
 .status-busy    { background: var(--warn); }
 .status-stopped { background: var(--text-faint); }
+
+/* Optional extras in setup — present but not in the way of getting started. */
+.setup-more { margin: 18px 0 22px; }
+.setup-more summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-weight: 550;
+  padding: 6px 0;
+}
+.setup-more summary:hover { color: var(--accent); }
+.setup-more a { color: var(--accent); }
+.setup-more code {
+  background: var(--surface-2);
+  padding: 1px 6px;
+  border-radius: 5px;
+  font-family: var(--mono);
+  font-size: 0.9em;
+}

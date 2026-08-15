@@ -133,6 +133,18 @@ export default function Setup({ onReady }: Props) {
             </p>
           </div>
 
+          <details className="setup-more">
+            <summary>Want even better lyrics? (optional)</summary>
+            <p className="hint">
+              Aria writes lyrics on its own and picks the best of several
+              attempts. If you also install <a href="https://ollama.com" target="_blank" rel="noreferrer">Ollama</a> and
+              pull a small model like <code>llama3.2:3b</code>, Aria will use it
+              instead — the words come out noticeably more coherent and stay in
+              the language you asked for. Aria finds it automatically, and
+              everything still runs on your own machine.
+            </p>
+          </details>
+
           <div className="btn-row">
             <button
               type="button"

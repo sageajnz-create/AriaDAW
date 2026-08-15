@@ -198,6 +198,63 @@ impl LyricWriter {
     }
 }
 
+/// How good a set of lyrics is, from 0 (unusable) to 1.
+///
+/// This exists because ACE-Step's own lyric writer is not consistently bad — it
+/// is *inconsistent*. Four runs of the same prompt scored 0.05, 0.00, 0.69 and
+/// 0.03: one in four was genuinely good and the rest were repetition or
+/// nothing at all. A score lets us generate a few and keep the best, which
+/// turns that variance into quality without needing another model.
+///
+/// Judged on what actually went wrong in practice: repeated lines, filler
+/// syllables instead of words, and too few lines to be a song.
+pub fn score_lyrics(lyrics: &str) -> f64 {
+    let lines: Vec<&str> = lyrics
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('['))
+        .collect();
+
+    if lines.is_empty() {
+        return 0.0;
+    }
+
+    let unique: std::collections::HashSet<&str> = lines.iter().copied().collect();
+    let distinct = unique.len() as f64 / lines.len() as f64;
+
+    let noise = lines.iter().filter(|l| is_filler(l)).count() as f64 / lines.len() as f64;
+
+    // Below about six sung lines there isn't a song there, however varied.
+    let enough = (lines.len() as f64 / 6.0).min(1.0);
+
+    distinct * (1.0 - noise) * enough
+}
+
+/// A line that is vocalising rather than saying anything: "oh oh oh", "la la la".
+fn is_filler(line: &str) -> bool {
+    // Punctuation separates words rather than disappearing: dropping the
+    // hyphens in "Wah-oh-oh-oh" would glue it into one unrecognised token,
+    // and that exact form is what the engine actually produced.
+    let cleaned: String = line
+        .chars()
+        .map(|c| if c.is_alphabetic() { c.to_ascii_lowercase() } else { ' ' })
+        .collect();
+    let words: Vec<&str> = cleaned.split_whitespace().collect();
+    if words.is_empty() {
+        return true;
+    }
+    const FILLER: &[&str] = &[
+        "oh", "ooh", "ah", "aah", "yeah", "na", "la", "da", "hmm", "mmm", "woo",
+        "hey", "ay", "uh", "wah", "ooo", "mm", "ha",
+    ];
+    words.iter().all(|w| FILLER.contains(w))
+}
+
+/// Good enough to stop looking. Set from the measurements above: the one good
+/// run scored 0.69 and the failures sat below 0.06, so anything near 0.55 is
+/// comfortably on the right side of that gap.
+pub const GOOD_ENOUGH: f64 = 0.55;
+
 /// Strip the things instruct models add despite being told not to: code fences,
 /// a leading title, and any trailing commentary after the last lyric line.
 fn clean(raw: &str) -> String {
@@ -230,7 +287,43 @@ fn clean(raw: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::clean;
+    use super::{clean, is_filler, score_lyrics, GOOD_ENOUGH};
+
+    #[test]
+    fn scores_real_engine_output_the_way_a_listener_would() {
+        // Taken from actual runs. The repetitive one is what a user described
+        // as "just sounds and not words".
+        let repetitive = "[Verse 1]\nI talk talk talk talk talk\nI talk talk talk talk talk\n\
+                          I talk talk talk talk talk\nI talk talk talk talk talk";
+        let vocalising = "[Verse 1]\nWah-oh-oh-oh-oh\nOh oh oh\nLa la la\nYeah yeah";
+        let good = "[Verse 1]\nThe sun is shining down on me\nRiverbeds are lined with stones\n\
+                    Gouda gold in farming fields\nWe carved out our own space\n\
+                    Feet on the ground, stories told\nThe breeze is whispering secrets";
+
+        assert!(score_lyrics(repetitive) < 0.3, "repetition should score badly");
+        assert!(score_lyrics(vocalising) < 0.3, "filler should score badly");
+        assert!(score_lyrics(good) >= GOOD_ENOUGH, "real verses should pass");
+        assert_eq!(score_lyrics(""), 0.0);
+        assert_eq!(score_lyrics("[Intro]\n[Outro]"), 0.0, "markers alone are not a song");
+    }
+
+    #[test]
+    fn a_couple_of_good_lines_is_not_enough() {
+        // Distinct, but too short to be a song — must not beat a full lyric.
+        let stub = "[Verse]\nOne good line here\nAnother good line";
+        assert!(score_lyrics(stub) < GOOD_ENOUGH);
+    }
+
+    #[test]
+    fn recognises_filler_without_eating_real_words() {
+        assert!(is_filler("oh oh oh"));
+        assert!(is_filler("La la la"));
+        assert!(is_filler("Wah-oh-oh-oh"));
+        assert!(!is_filler("The sun is shining"));
+        // "Yeah" alone is filler; used in a sentence it isn't.
+        assert!(is_filler("yeah yeah"));
+        assert!(!is_filler("yeah I remember"));
+    }
 
     #[test]
     fn strips_fences_and_commentary() {
