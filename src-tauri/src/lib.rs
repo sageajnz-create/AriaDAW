@@ -145,24 +145,39 @@ fn save_settings(path: &PathBuf, s: &EngineSettings) {
 
 // ------------------------------------------------------------------- commands
 
+// Tauri runs non-async commands on the main thread, which is also the GTK event
+// loop. Anything slow there stops the window repainting — it goes grey, exactly
+// as reported. `start_engine` can block for a minute loading multi-gigabyte
+// models, and `engine_status` waits on the same mutex that a running generation
+// holds. Both move to a blocking pool so the UI keeps painting.
+
 #[tauri::command]
-fn engine_status(state: State<'_, Arc<AppState>>) -> Result<EngineStatus, String> {
-    let eng = state.engine.lock().unwrap();
-    let models = eng.paths.available_models().unwrap_or_default();
-    Ok(EngineStatus {
-        state: eng.state(),
-        models_complete: models.is_complete(),
-        supports_stems: models.supports_stems(),
-        models,
-        vae_chunk: eng.settings.vae_chunk,
-        cpu_fallback: eng.settings.cpu_fallback,
+async fn engine_status(state: State<'_, Arc<AppState>>) -> Result<EngineStatus, String> {
+    let st = Arc::clone(&state);
+    tauri::async_runtime::spawn_blocking(move || {
+        let eng = st.engine.lock().unwrap();
+        let models = eng.paths.available_models().unwrap_or_default();
+        EngineStatus {
+            state: eng.state(),
+            models_complete: models.is_complete(),
+            supports_stems: models.supports_stems(),
+            models,
+            vae_chunk: eng.settings.vae_chunk,
+            cpu_fallback: eng.settings.cpu_fallback,
+        }
     })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn start_engine(state: State<'_, Arc<AppState>>) -> Result<(), String> {
-    let mut eng = state.engine.lock().unwrap();
-    eng.start().map_err(|e| e.to_string())
+async fn start_engine(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let st = Arc::clone(&state);
+    tauri::async_runtime::spawn_blocking(move || {
+        st.engine.lock().unwrap().start().map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
