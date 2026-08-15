@@ -825,7 +825,9 @@ fn attempt_generation(
             let probe = json!({
                 "lm_model": lm_for_words,
                 "lm_mode": "inspire",
-                "caption": opts.prompt,
+                // Short prompts make this writer produce nothing at all, so
+                // give it something to work from. See enrich_short_prompt.
+                "caption": lyrics::enrich_short_prompt(&opts.prompt),
                 "duration": opts.duration,
                 "vocal_language": language,
                 "lm_temperature": opts.lyric_variety.unwrap_or(0.45),
