@@ -181,14 +181,19 @@ async fn start_engine(state: State<'_, Arc<AppState>>) -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Off the main thread: this queries SQLite and stats every track's file to
+/// work out whether it still exists, and it runs on every library refresh.
 #[tauri::command]
-fn list_tracks(state: State<'_, Arc<AppState>>, limit: Option<i64>) -> Result<Vec<Track>, String> {
-    state
-        .library
-        .lock()
-        .unwrap()
-        .list(limit.unwrap_or(500))
-        .map_err(|e| e.to_string())
+async fn list_tracks(
+    state: State<'_, Arc<AppState>>,
+    limit: Option<i64>,
+) -> Result<Vec<Track>, String> {
+    let st = Arc::clone(&state);
+    tauri::async_runtime::spawn_blocking(move || {
+        st.library.lock().unwrap().list(limit.unwrap_or(500)).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -720,8 +725,17 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .register_uri_scheme_protocol("aria", |ctx, request| {
-            serve_track(ctx.app_handle(), request)
+        // Asynchronous on purpose. The synchronous form runs the handler on the
+        // main thread, which is the GTK event loop — and this handler does a
+        // database lookup plus a multi-megabyte file read. Opening the library
+        // fires one request per track at once, so the window stopped repainting
+        // and went grey exactly when a finished song appeared. Serving off-thread
+        // keeps the UI alive.
+        .register_asynchronous_uri_scheme_protocol("aria", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            std::thread::spawn(move || {
+                responder.respond(serve_track(&app, request));
+            });
         })
         .setup(|app| {
             let data_dir = app

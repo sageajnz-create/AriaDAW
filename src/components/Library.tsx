@@ -125,7 +125,7 @@ export default function Library({
               <>
                 <audio
                   controls
-                  preload="metadata"
+                  preload="none"
                   src={src}
                   onError={(e) =>
                     setPlayError((p) => ({
