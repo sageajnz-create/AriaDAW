@@ -81,6 +81,7 @@ export const previewStatus: EngineStatus = {
   },
   models_complete: true,
   supports_stems: true,
+  has_xl: true,
   vae_chunk: 128,
   cpu_fallback: false,
 };

@@ -43,6 +43,7 @@ export interface EngineStatus {
   models: AvailableModels;
   models_complete: boolean;
   supports_stems: boolean;
+  has_xl: boolean;
   vae_chunk: number;
   cpu_fallback: boolean;
 }
@@ -60,7 +61,7 @@ export interface GenerateOptions {
   vocal_language?: string | null;
   seed?: number | null;
   /** "best" (SFT, 50 steps) or "fast" (turbo, 8 steps). */
-  quality?: "best" | "fast";
+  quality?: "best" | "fast" | "studio";
   /** How many takes of the same prompt, 1-4. */
   variations?: number;
   /** "mp3" or "wav24" for lossless. */

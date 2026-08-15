@@ -19,7 +19,7 @@ export interface StudioValues {
   keyscale: string;
   seed: string;
   embellish: boolean;
-  quality: "best" | "fast";
+  quality: "best" | "fast" | "studio";
   variations: number;
   format: "mp3" | "wav24";
   voiceFrom: string;
@@ -32,10 +32,12 @@ interface Props {
   lyricsRef: React.RefObject<HTMLTextAreaElement>;
   /** Tracks that can act as a voice reference. */
   voiceChoices: Array<{ id: string; title: string }>;
+  /** The 4B sound model is installed, so the studio tier is available. */
+  hasXl: boolean;
 }
 
 export default function Studio({
-  values, onChange, disabled, lyricsRef, voiceChoices,
+  values, onChange, disabled, lyricsRef, voiceChoices, hasXl,
 }: Props) {
   /** Insert a tag at the cursor, keeping focus where the user was typing. */
   function insertTag(tag: string) {
@@ -215,12 +217,19 @@ export default function Studio({
         <select
           id="quality"
           value={values.quality}
-          onChange={(e) => onChange({ quality: e.target.value as "best" | "fast" })}
+          onChange={(e) =>
+            onChange({ quality: e.target.value as "best" | "fast" | "studio" })
+          }
           disabled={disabled}
           aria-describedby="quality-hint"
         >
           <option value="best">Best — better words and richer sound (about a minute)</option>
           <option value="fast">Fast — rougher, good for trying ideas (about 25 seconds)</option>
+          {hasXl && (
+            <option value="studio">
+              Studio — the largest sound model, punchier detail (several minutes)
+            </option>
+          )}
         </select>
         <p className="hint" id="quality-hint">
           Best uses larger models that write more coherent lyrics, stay in the
