@@ -16,6 +16,10 @@ export default function App() {
   const [canPlayAudio, setCanPlayAudio] = useState(true);
   // A derived track is being made; the library disables its controls meanwhile.
   const [deriving, setDeriving] = useState(false);
+  // Work in progress, shown in the library. Aria jumps there as soon as the
+  // first take is playable, which used to leave the remaining takes rendering
+  // out of sight — it looked like only one had been made.
+  const [working, setWorking] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
 
   // Bringing in your own recording unlocks every derived operation on it —
@@ -76,14 +80,22 @@ export default function App() {
   // and re-enable the library's controls when one lands.
   useEffect(() => {
     const offs = [
+      onEvent<{ stage: string; detail: string }>("gen:stage", (p) => {
+        setWorking(p.detail || null);
+      }),
+      onEvent<{ track: Track }>("gen:track", () => {
+        refreshTracks();
+      }),
       onEvent<{ track: Track }>("gen:done", () => {
         setDeriving(false);
         setImporting(false);
+        setWorking(null);
         refreshTracks();
       }),
       onEvent<{ message: string }>("gen:error", (p) => {
         setDeriving(false);
         setImporting(false);
+        setWorking(null);
         setBootError(p.message);
       }),
     ];
@@ -196,6 +208,20 @@ export default function App() {
             </div>
           ) : (
             <div role="tabpanel" id="panel-library" aria-labelledby="tab-library">
+              {/* Announced politely: the Create tab's own progress is hidden
+                  while the library is showing, so this is the only signal that
+                  more takes are still coming. */}
+              <div aria-live="polite" aria-atomic="true">
+                {working && (
+                  <div className="working-strip">
+                    <span className="pulse" aria-hidden="true" />
+                    <span>{working}</span>
+                    <span className="working-note">
+                      Songs appear here as each one finishes.
+                    </span>
+                  </div>
+                )}
+              </div>
               <LibraryView
                 tracks={tracks}
                 onChanged={refreshTracks}

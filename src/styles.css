@@ -388,6 +388,27 @@ input[type="range"]:hover::-moz-range-thumb { background: var(--accent-hot); }
 .notice p { margin: 0; }
 .notice strong { display: block; margin-bottom: 3px; }
 
+/* Work still in progress, shown above the library so remaining takes aren't
+   invisible once Aria jumps here with the first one. */
+.working-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 13px 18px;
+  margin-bottom: 16px;
+  font-weight: 600;
+}
+.working-note {
+  color: var(--text-dim);
+  font-weight: 400;
+  font-size: 0.875rem;
+  margin-left: auto;
+}
+
 /* --- track list --------------------------------------------------------- */
 .tracks { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
 
