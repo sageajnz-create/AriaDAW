@@ -47,15 +47,34 @@ vendor runtime to install. That is essential for a tool meant to be free to ever
 
 ### Model tiers (auto-selected from detected VRAM)
 
-| Tier | DiT | LM | Encoder | VAE | Total |
-|---|---|---|---|---|---|
-| **Light** (≥4 GB) | turbo Q6_K 1.97 GB | 0.6B Q8_0 710 MB | Q8_0 784 MB | BF16 322 MB | **~3.8 GB** |
-| **Standard** (≥8 GB) ← this box | turbo Q8_0 2.55 GB | 1.7B Q8_0 1.98 GB | Q8_0 784 MB | BF16 322 MB | **~5.6 GB** |
-| **Quality** (≥16 GB) | xl-sft Q8_0 5.31 GB | 4B Q8_0 4.46 GB | Q8_0 784 MB | BF16 322 MB | **~10.9 GB** |
-| **CPU fallback** | turbo Q4_K_M 1.45 GB | 0.6B Q8_0 710 MB | Q8_0 784 MB | BF16 322 MB | **~3.3 GB** |
+Models load in stages — the LM is unloaded before the DiT — so peak VRAM is set by the
+largest single model, not the sum on disk.
 
-Nobody should have to read this table. The installer detects VRAM, picks a tier, and
-says "this will take about X minutes per song" in plain language.
+| Tier | LM | DiT | Peak VRAM | Disk |
+|---|---|---|---|---|
+| **Light** (≥4 GB) | 0.6B Q8_0 | turbo Q6_K | ~2 GB | ~3.8 GB |
+| **Standard** (≥6 GB) | 1.7B Q8_0 | turbo Q8_0 | ~3 GB | ~5.6 GB |
+| **Best** (≥8 GB) ← this box | 4B Q8_0 | sft Q8_0 | **7.0 GB measured** | ~12 GB |
+
+**The 4B does not fit a 6 GB card.** Measured at 7048 MB of 8176 on the RX 6650 XT, so
+8 GB is the real floor for the best tier. Smaller cards get the 1.7B, which is
+materially worse — see below.
+
+### Quality is a model-pair choice, and it is user-visible
+
+Measured on a 60-second song:
+
+| | Fast | Best |
+|---|---|---|
+| Models | smallest LM + turbo, 8 steps | largest LM + SFT, 50 steps |
+| Time | ~23 s | ~55 s |
+
+Best is the default. Unlimited local generation means a slower setting only spends
+patience, so there is no reason to default to the cheap path the way a metered service
+would.
+
+Nobody should have to read any of this. The installer detects VRAM, picks a tier, and
+says how long a song will take in plain language.
 
 ---
 
