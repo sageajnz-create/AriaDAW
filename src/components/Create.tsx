@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
-import { api } from "../api";
+import { api, onEvent } from "../api";
+import { isDesktop, runPreviewGeneration } from "../preview";
 import type { StageEvent, Track } from "../types";
 
 /** Plain-language labels. No jargon — the person using this may not make music. */
@@ -28,8 +28,8 @@ export default function Create({ onCreated, engineReady }: Props) {
   const [error, setError] = useState<string | null>(null);
   const jobRef = useRef<string | null>(null);
 
-  // Elapsed timer — local generation takes as long as it takes, and showing
-  // real time is more honest than a fake progress bar.
+  // Elapsed timer. Local generation takes as long as it takes, and showing real
+  // seconds is more honest than animating a progress bar we can't predict.
   useEffect(() => {
     if (!busy) return;
     const t = setInterval(() => setElapsed((e) => e + 1), 1000);
@@ -37,38 +37,38 @@ export default function Create({ onCreated, engineReady }: Props) {
   }, [busy]);
 
   useEffect(() => {
-    const unlisten: Array<Promise<() => void>> = [];
+    const offs: Array<Promise<() => void>> = [];
 
-    unlisten.push(
-      listen<StageEvent>("gen:stage", (e) => {
-        if (jobRef.current && e.payload.job_id !== jobRef.current) return;
-        setStage(e.payload.stage);
-        setDetail(e.payload.detail);
+    offs.push(
+      onEvent<StageEvent>("gen:stage", (p) => {
+        if (jobRef.current && p.job_id !== jobRef.current) return;
+        setStage(p.stage);
+        setDetail(p.detail);
       }),
     );
 
-    unlisten.push(
-      listen<{ job_id: string; track: Track }>("gen:done", (e) => {
-        if (jobRef.current && e.payload.job_id !== jobRef.current) return;
+    offs.push(
+      onEvent<{ job_id: string; track: Track }>("gen:done", (p) => {
+        if (jobRef.current && p.job_id !== jobRef.current) return;
         setBusy(false);
         setStage(null);
         jobRef.current = null;
-        onCreated(e.payload.track);
+        onCreated(p.track);
       }),
     );
 
-    unlisten.push(
-      listen<{ job_id: string; message: string }>("gen:error", (e) => {
-        if (jobRef.current && e.payload.job_id !== jobRef.current) return;
+    offs.push(
+      onEvent<{ job_id: string; message: string }>("gen:error", (p) => {
+        if (jobRef.current && p.job_id !== jobRef.current) return;
         setBusy(false);
         setStage(null);
         jobRef.current = null;
-        setError(e.payload.message);
+        setError(p.message);
       }),
     );
 
     return () => {
-      unlisten.forEach((p) => p.then((f) => f()));
+      offs.forEach((p) => p.then((f) => f()));
     };
   }, [onCreated]);
 
@@ -80,6 +80,22 @@ export default function Create({ onCreated, engineReady }: Props) {
     setElapsed(0);
     setStage("starting");
     setDetail("");
+
+    if (!isDesktop) {
+      runPreviewGeneration(
+        (s, d) => {
+          setStage(s);
+          setDetail(d);
+        },
+        (t) => {
+          setBusy(false);
+          setStage(null);
+          onCreated(t);
+        },
+      );
+      return;
+    }
+
     try {
       jobRef.current = await api.generate({
         prompt: prompt.trim(),
@@ -155,13 +171,11 @@ export default function Create({ onCreated, engineReady }: Props) {
           >
             {busy ? "Making your song…" : "Make my song"}
           </button>
-          {!engineReady && !busy && (
-            <span className="hint">Starting the engine…</span>
-          )}
+          {!engineReady && !busy && <span className="hint">Starting the engine…</span>}
         </div>
       </form>
 
-      {/* Progress is announced politely so screen-reader users hear each step. */}
+      {/* Announced politely so screen-reader users hear each step as it happens. */}
       <div aria-live="polite" aria-atomic="true">
         {busy && stage && (
           <div className="progress">

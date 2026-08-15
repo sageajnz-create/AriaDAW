@@ -15,7 +15,10 @@
 
   --text: #f5f0ea;
   --text-dim: #b6aca4;   /* 7.1:1 on --bg */
-  --text-faint: #8a807a; /* 4.6:1 on --bg */
+  /* Tuned against --surface, not --bg: faint text mostly sits on cards, and
+     --surface is lighter, which *lowers* contrast for light text. Measured at
+     4.48:1 on --surface at the old value, just under AA. */
+  --text-faint: #968c85;
 
   --accent: #e8a44c;
   --accent-hot: #f2b968;

@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, audioUrl, formatDate, formatDuration } from "../api";
+import { isDesktop } from "../preview";
 import type { Track } from "../types";
 
 interface Props {
@@ -10,6 +11,22 @@ interface Props {
 export default function Library({ tracks, onChanged }: Props) {
   const [openLyrics, setOpenLyrics] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [urls, setUrls] = useState<Record<string, string>>({});
+
+  // File paths have to be converted to playable URLs by the desktop shell.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const next: Record<string, string> = {};
+      for (const t of tracks) {
+        next[t.id] = await audioUrl(t.audio_path);
+      }
+      if (!cancelled) setUrls(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tracks]);
 
   if (tracks.length === 0) {
     return (
@@ -35,6 +52,7 @@ export default function Library({ tracks, onChanged }: Props) {
     <ul className="tracks">
       {tracks.map((t) => {
         const lyricsOpen = openLyrics === t.id;
+        const src = urls[t.id];
         return (
           <li key={t.id} className="track">
             <div className="track-top">
@@ -51,18 +69,20 @@ export default function Library({ tracks, onChanged }: Props) {
 
               <div className="track-actions">
                 <button
+                  type="button"
                   className="btn btn-icon"
                   onClick={() => toggleFavorite(t)}
                   aria-pressed={t.favorite}
-                  // Text, not just a colour or icon, so the state is never
-                  // conveyed by appearance alone.
                   title={t.favorite ? "Remove from favourites" : "Add to favourites"}
                 >
+                  {/* Carries a word as well as a symbol, so the state is never
+                      communicated by appearance alone. */}
                   {t.favorite ? "★ Favourite" : "☆ Favourite"}
                 </button>
 
                 {t.lyrics && (
                   <button
+                    type="button"
                     className="btn btn-icon"
                     onClick={() => setOpenLyrics(lyricsOpen ? null : t.id)}
                     aria-expanded={lyricsOpen}
@@ -72,18 +92,23 @@ export default function Library({ tracks, onChanged }: Props) {
                   </button>
                 )}
 
-                <button
-                  className="btn btn-icon"
-                  onClick={() => setConfirmDelete(t.id)}
-                >
+                <button type="button" className="btn btn-icon" onClick={() => setConfirmDelete(t.id)}>
                   Delete
                 </button>
               </div>
             </div>
 
-            <audio controls preload="none" src={audioUrl(t.audio_path)}>
-              Your browser cannot play audio.
-            </audio>
+            {src ? (
+              <audio controls preload="none" src={src}>
+                Your browser cannot play audio.
+              </audio>
+            ) : (
+              !isDesktop && (
+                <p className="hint" style={{ marginTop: 12 }}>
+                  Audio plays in the Aria app. This is a design preview.
+                </p>
+              )
+            )}
 
             {lyricsOpen && (
               <div className="lyrics" id={`lyrics-${t.id}`}>
@@ -92,17 +117,26 @@ export default function Library({ tracks, onChanged }: Props) {
             )}
 
             {confirmDelete === t.id && (
-              <div className="notice notice-warn" role="alertdialog" aria-label="Confirm delete">
+              <div
+                className="notice notice-warn"
+                role="alertdialog"
+                aria-label="Confirm delete"
+              >
                 <div>
                   <p>
                     <strong>Delete "{t.title}"?</strong>
                     This removes the audio file from your computer. It can't be undone.
                   </p>
                   <div className="btn-row" style={{ marginTop: 12 }}>
-                    <button className="btn" onClick={() => remove(t.id)}>
+                    <button type="button" className="btn" onClick={() => remove(t.id)}>
                       Yes, delete it
                     </button>
-                    <button className="btn" onClick={() => setConfirmDelete(null)} autoFocus>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => setConfirmDelete(null)}
+                      autoFocus
+                    >
                       Keep it
                     </button>
                   </div>

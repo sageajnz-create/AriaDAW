@@ -212,6 +212,22 @@ impl Engine {
             cmd.env("GGML_BACKEND", "cpu");
         }
 
+        // Tie the engine's life to ours. `Drop` handles a clean shutdown, but it
+        // never runs on SIGKILL or a hard crash — and an orphaned ace-server keeps
+        // several GB of VRAM allocated with no UI left to free it. Observed for
+        // real: killing the app left ace-server resident.
+        #[cfg(target_os = "linux")]
+        unsafe {
+            use std::os::unix::process::CommandExt;
+            cmd.pre_exec(|| {
+                // Ask the kernel to SIGTERM this child when its parent dies.
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+
         let mut child = cmd.spawn().with_context(|| {
             format!("failed to launch engine at {}", self.paths.server_bin.display())
         })?;

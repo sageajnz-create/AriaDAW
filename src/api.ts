@@ -1,20 +1,89 @@
-import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import type { EngineStatus, GenerateOptions, Track } from "./types";
+import { isDesktop, previewStatus, previewTracks } from "./preview";
+
+// Tauri modules are imported lazily so a plain browser tab doesn't blow up on
+// load. See preview.ts for why browser mode exists at all.
+async function tauri() {
+  return await import("@tauri-apps/api/core");
+}
+
+/** In-memory store standing in for the library when previewing in a browser. */
+let previewLibrary: Track[] = [...previewTracks];
 
 export const api = {
-  engineStatus: () => invoke<EngineStatus>("engine_status"),
-  startEngine: () => invoke<void>("start_engine"),
-  generate: (options: GenerateOptions) => invoke<string>("generate", { options }),
-  listTracks: (limit?: number) => invoke<Track[]>("list_tracks", { limit }),
-  setFavorite: (id: string, favorite: boolean) =>
-    invoke<void>("set_favorite", { id, favorite }),
-  renameTrack: (id: string, title: string) => invoke<void>("rename_track", { id, title }),
-  deleteTrack: (id: string) => invoke<void>("delete_track", { id }),
-  libraryFolder: () => invoke<string>("library_folder"),
+  engineStatus: async (): Promise<EngineStatus> => {
+    if (!isDesktop) return previewStatus;
+    return (await tauri()).invoke<EngineStatus>("engine_status");
+  },
+
+  startEngine: async (): Promise<void> => {
+    if (!isDesktop) return;
+    return (await tauri()).invoke<void>("start_engine");
+  },
+
+  generate: async (options: GenerateOptions): Promise<string> => {
+    if (!isDesktop) return `preview-job-${Date.now()}`;
+    return (await tauri()).invoke<string>("generate", { options });
+  },
+
+  listTracks: async (limit?: number): Promise<Track[]> => {
+    if (!isDesktop) return previewLibrary;
+    return (await tauri()).invoke<Track[]>("list_tracks", { limit });
+  },
+
+  setFavorite: async (id: string, favorite: boolean): Promise<void> => {
+    if (!isDesktop) {
+      previewLibrary = previewLibrary.map((t) => (t.id === id ? { ...t, favorite } : t));
+      return;
+    }
+    return (await tauri()).invoke<void>("set_favorite", { id, favorite });
+  },
+
+  renameTrack: async (id: string, title: string): Promise<void> => {
+    if (!isDesktop) {
+      previewLibrary = previewLibrary.map((t) => (t.id === id ? { ...t, title } : t));
+      return;
+    }
+    return (await tauri()).invoke<void>("rename_track", { id, title });
+  },
+
+  deleteTrack: async (id: string): Promise<void> => {
+    if (!isDesktop) {
+      previewLibrary = previewLibrary.filter((t) => t.id !== id);
+      return;
+    }
+    return (await tauri()).invoke<void>("delete_track", { id });
+  },
+
+  libraryFolder: async (): Promise<string> => {
+    if (!isDesktop) return "~/Music/Aria";
+    return (await tauri()).invoke<string>("library_folder");
+  },
 };
 
-/** Local file path -> a URL the webview is allowed to play. */
-export const audioUrl = (path: string) => convertFileSrc(path);
+/** Local file path -> a URL the webview may play. */
+export async function audioUrl(path: string): Promise<string> {
+  if (!isDesktop || !path) return "";
+  const { convertFileSrc } = await tauri();
+  return convertFileSrc(path);
+}
+
+/** Open a folder in the system file manager. No-op outside the desktop app. */
+export async function openFolder(path: string): Promise<void> {
+  if (!isDesktop) return;
+  const { openPath } = await import("@tauri-apps/plugin-opener");
+  await openPath(path);
+}
+
+/** Subscribe to a backend event. Returns an unsubscribe function. */
+export async function onEvent<T>(
+  name: string,
+  handler: (payload: T) => void,
+): Promise<() => void> {
+  if (!isDesktop) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<T>(name, (e) => handler(e.payload));
+}
 
 export function formatDuration(seconds: number): string {
   if (!isFinite(seconds) || seconds <= 0) return "0:00";

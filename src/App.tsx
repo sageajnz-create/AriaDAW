@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { openPath } from "@tauri-apps/plugin-opener";
 import Create from "./components/Create";
 import LibraryView from "./components/Library";
-import { api } from "./api";
+import { api, openFolder } from "./api";
+import { isDesktop } from "./preview";
 import type { EngineStatus, Track } from "./types";
 
 type Tab = "create" | "library";
@@ -72,6 +72,7 @@ export default function App() {
           <p className="tagline">Your music. Your machine. No limits.</p>
           <div className="masthead-actions">
             <button
+              type="button"
               className="btn btn-icon"
               onClick={() => setLargeText((v) => !v)}
               aria-pressed={largeText}
@@ -83,6 +84,7 @@ export default function App() {
 
         <div className="tabs" role="tablist" aria-label="Sections">
           <button
+            type="button"
             role="tab"
             id="tab-create"
             className="tab"
@@ -93,6 +95,7 @@ export default function App() {
             Create
           </button>
           <button
+            type="button"
             role="tab"
             id="tab-library"
             className="tab"
@@ -154,11 +157,14 @@ export default function App() {
           {status?.cpu_fallback && <span>Using CPU rendering</span>}
 
           <button
+            type="button"
             className="btn btn-icon"
-            onClick={async () => openPath(await api.libraryFolder())}
+            onClick={async () => openFolder(await api.libraryFolder())}
           >
             Open my music folder
           </button>
+
+          {!isDesktop && <span>Design preview — not the real app</span>}
 
           <span style={{ marginLeft: "auto" }}>
             Everything you make is yours.

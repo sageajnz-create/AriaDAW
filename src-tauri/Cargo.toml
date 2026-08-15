@@ -31,6 +31,11 @@ dirs = "5"
 thiserror = "2"
 anyhow = "1"
 
+[target.'cfg(unix)'.dependencies]
+# Used to tie the engine process's lifetime to ours (PR_SET_PDEATHSIG), so a
+# force-quit can't leave a multi-GB GPU process running.
+libc = "0.2"
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
