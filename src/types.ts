@@ -43,9 +43,11 @@ export interface GenerateOptions {
   lyrics?: string;
   duration?: number;
   instrumental?: boolean;
-  lock_prompt?: boolean;
+  /** Let the model expand the description. Also makes it re-pick the language. */
+  embellish?: boolean;
   bpm?: number | null;
   keyscale?: string | null;
+  timesignature?: string | null;
   vocal_language?: string | null;
   seed?: number | null;
 }

@@ -46,14 +46,22 @@ pub struct GenerateOptions {
     pub duration: f64,
     #[serde(default)]
     pub instrumental: bool,
-    /// When false, the model rewrites the caption and may override the user's
-    /// stated intent. Studio mode sets this true to keep their words.
+    /// Let the model expand the description into a richer caption of its own.
+    ///
+    /// Off by default, and that default is load-bearing. With expansion on, the
+    /// model's chain-of-thought also re-decides the *language* and ignores the
+    /// `vocal_language` field entirely — measured directly: an English request
+    /// produced Norwegian, then Indonesian, then no lyrics at all. With it off,
+    /// language was correct 3/3 in English plus Spanish and Japanese, the user's
+    /// wording survives verbatim, and it runs a second faster.
     #[serde(default)]
-    pub lock_prompt: bool,
+    pub embellish: bool,
     #[serde(default)]
     pub bpm: Option<i64>,
     #[serde(default)]
     pub keyscale: Option<String>,
+    #[serde(default)]
+    pub timesignature: Option<String>,
     #[serde(default)]
     pub vocal_language: Option<String>,
     #[serde(default)]
@@ -307,15 +315,17 @@ fn attempt_generation(
         "guidance_scale": 1.0,
         "shift": 3.0,
     });
-    // Keep the user's own words when they've asked us to.
-    if opts.lock_prompt {
-        req["use_cot_caption"] = json!(false);
-    }
-    if let Some(b) = opts.bpm {
+    // See `embellish`: leaving expansion on lets the model's CoT override the
+    // requested language, so it stays off unless explicitly asked for.
+    req["use_cot_caption"] = json!(opts.embellish);
+    if let Some(b) = opts.bpm.filter(|b| *b > 0) {
         req["bpm"] = json!(b);
     }
-    if let Some(k) = &opts.keyscale {
+    if let Some(k) = opts.keyscale.as_ref().filter(|k| !k.trim().is_empty()) {
         req["keyscale"] = json!(k);
+    }
+    if let Some(t) = opts.timesignature.as_ref().filter(|t| !t.trim().is_empty()) {
+        req["timesignature"] = json!(t);
     }
     // Always send a language. Omitting it lets the model choose one at random.
     req["vocal_language"] = json!(opts
@@ -323,7 +333,9 @@ fn attempt_generation(
         .clone()
         .filter(|l| !l.trim().is_empty())
         .unwrap_or_else(default_vocal_language));
-    if let Some(s) = opts.seed {
+    // -1 means "pick one for me"; the engine echoes back the seed it used, so a
+    // track can always be reproduced from its library entry.
+    if let Some(s) = opts.seed.filter(|s| *s >= 0) {
         req["seed"] = json!(s);
     }
 

@@ -288,6 +288,52 @@ input[type="range"]::-moz-range-thumb {
 input[type="range"]:hover::-webkit-slider-thumb { background: var(--accent-hot); }
 input[type="range"]:hover::-moz-range-thumb { background: var(--accent-hot); }
 
+/* --- studio (detailed controls) ----------------------------------------- */
+.disclosure {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: 1px dashed var(--border-strong);
+  color: var(--text-dim);
+}
+.disclosure:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+
+.studio {
+  border-left: 2px solid var(--border-strong);
+  padding-left: 20px;
+  margin: 4px 0 22px;
+}
+
+.lyrics-box {
+  min-height: 190px;
+  font-family: var(--mono);
+  font-size: 0.94rem;
+  line-height: 1.65;
+}
+
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+.btn-tag {
+  padding: 6px 11px;
+  font-size: 0.82rem;
+  font-family: var(--mono);
+  font-weight: 500;
+  color: var(--text-dim);
+}
+
+.grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0 26px;
+}
+
 /* --- progress ----------------------------------------------------------- */
 .progress {
   margin-top: 22px;

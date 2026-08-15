@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api, onEvent } from "../api";
 import { isDesktop, runPreviewGeneration } from "../preview";
+import Studio, { studioToOptions, type StudioValues } from "./Studio";
 import type { StageEvent, Track } from "../types";
 
 /** Plain-language labels. No jargon — the person using this may not make music. */
@@ -28,7 +29,16 @@ export default function Create({ onCreated, engineReady }: Props) {
   const [detail, setDetail] = useState("");
   const [elapsed, setElapsed] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [studioOpen, setStudioOpen] = useState(false);
+  const [studio, setStudio] = useState<StudioValues>({
+    lyrics: "",
+    bpm: 0,
+    keyscale: "",
+    seed: "",
+    embellish: false,
+  });
   const jobRef = useRef<string | null>(null);
+  const lyricsRef = useRef<HTMLTextAreaElement>(null);
 
   // Seed the language picker from the user's locale. Without an explicit
   // language the model invents one, which is how an English reggae prompt came
@@ -115,6 +125,9 @@ export default function Create({ onCreated, engineReady }: Props) {
         instrumental,
         duration,
         vocal_language: language,
+        // Studio settings only apply when the panel is actually open, so a
+        // half-filled panel can't silently affect a Simple-mode song.
+        ...(studioOpen ? studioToOptions(studio) : {}),
       });
     } catch (err) {
       setBusy(false);
@@ -199,6 +212,31 @@ export default function Create({ onCreated, engineReady }: Props) {
             <span>Instrumental — no singing</span>
           </label>
         </div>
+
+        <div className="field">
+          <button
+            type="button"
+            className="btn disclosure"
+            onClick={() => setStudioOpen((v) => !v)}
+            aria-expanded={studioOpen}
+            aria-controls="studio-panel"
+            disabled={busy}
+          >
+            <span aria-hidden="true">{studioOpen ? "▾" : "▸"}</span>
+            {studioOpen ? "Hide the detailed controls" : "Write my own words, or set the tempo and key"}
+          </button>
+        </div>
+
+        {studioOpen && (
+          <div id="studio-panel">
+            <Studio
+              values={studio}
+              onChange={(v) => setStudio((s) => ({ ...s, ...v }))}
+              disabled={busy}
+              lyricsRef={lyricsRef}
+            />
+          </div>
+        )}
 
         <div className="btn-row">
           <button
