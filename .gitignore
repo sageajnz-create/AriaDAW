@@ -29,3 +29,6 @@ dist-ssr/
 .DS_Store
 .directory
 *.swp
+
+# Phase 0 scratch output
+/output/

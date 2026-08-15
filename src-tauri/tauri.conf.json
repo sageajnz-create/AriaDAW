@@ -1,0 +1,40 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Aria",
+  "version": "0.1.0",
+  "identifier": "org.aria.music",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Aria",
+        "width": 1100,
+        "height": 780,
+        "minWidth": 640,
+        "minHeight": 520,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$AUDIO/Aria/**", "$APPDATA/audio/**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["appimage", "deb"],
+    "icon": ["icons/icon.png"],
+    "category": "Music",
+    "shortDescription": "Free, unlimited, local AI music creation",
+    "longDescription": "Aria generates complete songs with vocals entirely on your own computer. No account, no credits, no subscription. Everything you make is yours."
+  }
+}
