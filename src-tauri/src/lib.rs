@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use client::{AceClient, JobStatus};
+use client::{AceClient, JobStatus, SynthSources};
 use engine::{AvailableModels, Engine, EnginePaths, EngineSettings, EngineState};
 use library::{Library, Track};
 
@@ -92,6 +92,14 @@ pub struct GenerateOptions {
     /// "mp3" (320 kbps) or "wav24" / "wav16" / "wav32" for lossless.
     #[serde(default)]
     pub format: Option<String>,
+    /// Id of a track whose singer this song should sound like.
+    ///
+    /// The engine takes timbre from the reference without borrowing its notes
+    /// or words, so one voice can carry across a whole set of songs. This is
+    /// the honest equivalent of Suno's Personas, except the reference is a
+    /// track you already own rather than an account-bound artifact.
+    #[serde(default)]
+    pub voice_from: Option<String>,
 }
 
 fn default_duration() -> f64 {
@@ -477,7 +485,10 @@ fn run_derive(
         .and_then(|p| std::fs::read(p).ok());
     let audio = if latent.is_none() { std::fs::read(&source.audio_path).ok() } else { None };
 
-    let job = ace.submit_synth_with_source(&req, audio, latent)?;
+    let job = ace.submit_synth_with_source(
+        &req,
+        SynthSources { audio, latent, ..Default::default() },
+    )?;
     wait_for(&ace, &job, app, job_id, "rendering", &describe(&op))?;
     let out = ace.synth_result(&job)?;
 
@@ -804,6 +815,23 @@ fn attempt_generation(
     req["output_format"] = json!(format);
     let ext = if format.starts_with("wav") { "wav" } else { "mp3" };
 
+    // Voice reference, if one was chosen. The cached latent is preferred, same
+    // as everywhere else, because it skips a VAE encode.
+    let voice: Option<SynthSources> = opts
+        .voice_from
+        .as_ref()
+        .filter(|id| !id.trim().is_empty())
+        .and_then(|id| st.library.lock().unwrap().get(id).ok().flatten())
+        .map(|t| {
+            let ref_latent = t.latent_path.as_ref().and_then(|p| std::fs::read(p).ok());
+            let ref_audio = if ref_latent.is_none() {
+                std::fs::read(&t.audio_path).ok()
+            } else {
+                None
+            };
+            SynthSources { ref_audio, ref_latent, ..Default::default() }
+        });
+
     let lm_id = ace.submit_lm(&req)?;
     wait_for(ace, &lm_id, app, job_id, "writing", "Writing the song")?;
     let enriched_all = ace.lm_results(&lm_id)?;
@@ -822,7 +850,17 @@ fn attempt_generation(
         enriched["output_format"] = json!(format);
         enriched["mp3_bitrate"] = json!(320);
 
-        let synth_id = ace.submit_synth(&enriched)?;
+        let synth_id = match &voice {
+            Some(v) => ace.submit_synth_with_source(
+                &enriched,
+                SynthSources {
+                    ref_audio: v.ref_audio.clone(),
+                    ref_latent: v.ref_latent.clone(),
+                    ..Default::default()
+                },
+            )?,
+            None => ace.submit_synth(&enriched)?,
+        };
         wait_for(ace, &synth_id, app, job_id, "rendering", &detail)?;
         let out = ace.synth_result(&synth_id)?;
 

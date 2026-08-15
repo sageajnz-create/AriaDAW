@@ -35,6 +35,18 @@ pub struct SynthOutput {
     pub latent: Option<Vec<u8>>,
 }
 
+/// Audio handed to a synth job: the source being transformed, and/or a
+/// reference whose voice and timbre should be borrowed.
+#[derive(Default)]
+pub struct SynthSources {
+    pub audio: Option<Vec<u8>>,
+    pub latent: Option<Vec<u8>>,
+    /// Voice reference — the engine takes timbre from this without using its
+    /// notes or words.
+    pub ref_audio: Option<Vec<u8>>,
+    pub ref_latent: Option<Vec<u8>>,
+}
+
 pub struct AceClient {
     base: String,
     http: reqwest::blocking::Client,
@@ -93,18 +105,12 @@ impl AceClient {
         self.submit("synth", req)
     }
 
-    /// Submit a synth job that works from existing audio — cover, repaint,
-    /// extend, stem extraction.
+    /// Submit a synth job with source and/or reference audio — cover, repaint,
+    /// extend, stem extraction, or generation that borrows a voice.
     ///
-    /// Prefers the cached latent over the audio file when we have one: the
-    /// engine hands back the latent it produced for every track, and replaying
-    /// it skips a VAE encode entirely.
-    pub fn submit_synth_with_source(
-        &self,
-        req: &Value,
-        audio: Option<Vec<u8>>,
-        latent: Option<Vec<u8>>,
-    ) -> Result<String> {
+    /// Prefers cached latents over audio files: the engine hands back the latent
+    /// it produced for every track, and replaying it skips a VAE encode.
+    pub fn submit_synth_with_source(&self, req: &Value, sources: SynthSources) -> Result<String> {
         use reqwest::blocking::multipart::{Form, Part};
 
         let mut form = Form::new().part(
@@ -114,19 +120,45 @@ impl AceClient {
                 .mime_str("application/json")?,
         );
 
-        form = match (latent, audio) {
-            (Some(l), _) => form.part(
-                "src_latents",
-                Part::bytes(l)
-                    .file_name("source.latent")
-                    .mime_str("application/octet-stream")?,
-            ),
-            (None, Some(a)) => form.part(
-                "audio",
-                Part::bytes(a).file_name("source.mp3").mime_str("audio/mpeg")?,
-            ),
-            (None, None) => return Err(anyhow!("this needs a source track")),
-        };
+        let SynthSources { audio, latent, ref_audio, ref_latent } = sources;
+
+        // A source is only required when the task transforms existing audio; a
+        // plain generation with a voice reference has none.
+        match (latent, audio) {
+            (Some(l), _) => {
+                form = form.part(
+                    "src_latents",
+                    Part::bytes(l)
+                        .file_name("source.latent")
+                        .mime_str("application/octet-stream")?,
+                )
+            }
+            (None, Some(a)) => {
+                form = form.part(
+                    "audio",
+                    Part::bytes(a).file_name("source.mp3").mime_str("audio/mpeg")?,
+                )
+            }
+            (None, None) => {}
+        }
+
+        match (ref_latent, ref_audio) {
+            (Some(l), _) => {
+                form = form.part(
+                    "ref_latents",
+                    Part::bytes(l)
+                        .file_name("voice.latent")
+                        .mime_str("application/octet-stream")?,
+                )
+            }
+            (None, Some(a)) => {
+                form = form.part(
+                    "ref_audio",
+                    Part::bytes(a).file_name("voice.mp3").mime_str("audio/mpeg")?,
+                )
+            }
+            (None, None) => {}
+        }
 
         let resp = self
             .http

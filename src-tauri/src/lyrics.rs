@@ -134,8 +134,14 @@ impl LyricWriter {
 
     /// Write lyrics for a song. `language` is a human-readable name ("English").
     pub fn write(&self, subject: &str, language: &str, seconds: f64) -> Result<String> {
-        // Roughly four sung lines per ten seconds, kept within sane bounds.
-        let lines = ((seconds / 10.0 * 4.0).round() as i64).clamp(8, 48);
+        // About eleven sung lines per minute.
+        //
+        // The first attempt asked for four lines per ten seconds — 19 a minute,
+        // roughly double how fast people actually sing. At two and a half
+        // minutes that meant 48 lines crammed into the time, leaving no room for
+        // an intro, a break or a held note, and the result was reported as
+        // "more of a bed than a song".
+        let lines = ((seconds / 60.0 * 11.0).round() as i64).clamp(6, 40);
 
         let system = "You write song lyrics. Output ONLY the lyrics and nothing else \
              — no title, no explanation, no notes.\n\
@@ -148,9 +154,15 @@ impl LyricWriter {
              - Keep lines short enough to sing, about 6 to 10 words.\n\
              - The lyrics must genuinely be about the subject given.";
 
+        // Naming the length and asking for instrumental space explicitly keeps
+        // the words from filling every second of a longer song.
+        let minutes = seconds / 60.0;
         let user = format!(
             "Write lyrics in {language} for this song: {subject}\n\
-             Around {lines} sung lines. Write them in {language}."
+             The song is about {minutes:.1} minutes long, so write around {lines} \
+             sung lines — no more. Leave room for the music: include an [Intro] \
+             and at least one instrumental section such as [Instrumental Break] \
+             or [Guitar Solo], and an [Outro]. Write the words in {language}."
         );
 
         let body = json!({

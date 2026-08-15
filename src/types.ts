@@ -65,6 +65,8 @@ export interface GenerateOptions {
   variations?: number;
   /** "mp3" or "wav24" for lossless. */
   format?: "mp3" | "wav24";
+  /** Track id whose singer this song should sound like. */
+  voice_from?: string | null;
 }
 
 /** Stages the backend reports while a song is being made. */

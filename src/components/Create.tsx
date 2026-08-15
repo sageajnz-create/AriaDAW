@@ -17,9 +17,11 @@ const STAGE_TEXT: Record<string, string> = {
 interface Props {
   onCreated: (t: Track) => void;
   engineReady: boolean;
+  /** Existing tracks, offered as voice references. */
+  tracks: Track[];
 }
 
-export default function Create({ onCreated, engineReady }: Props) {
+export default function Create({ onCreated, engineReady, tracks }: Props) {
   const [prompt, setPrompt] = useState("");
   const [instrumental, setInstrumental] = useState(false);
   const [duration, setDuration] = useState(60);
@@ -42,6 +44,7 @@ export default function Create({ onCreated, engineReady }: Props) {
     quality: "best",
     variations: 1,
     format: "mp3",
+    voiceFrom: "",
   });
   const jobRef = useRef<string | null>(null);
   const lyricsRef = useRef<HTMLTextAreaElement>(null);
@@ -137,9 +140,11 @@ export default function Create({ onCreated, engineReady }: Props) {
         instrumental,
         duration,
         vocal_language: language,
-        // Studio settings only apply when the panel is actually open, so a
-        // half-filled panel can't silently affect a Simple-mode song.
-        ...(studioOpen ? studioToOptions(studio) : {}),
+        // Always applied. Gating these on the panel being open meant anyone who
+        // set something and then collapsed the panel lost their choice without
+        // being told. Every value has a sensible default, so there is nothing
+        // to protect a Simple-mode song from.
+        ...studioToOptions(studio),
       });
     } catch (err) {
       setBusy(false);
@@ -246,6 +251,10 @@ export default function Create({ onCreated, engineReady }: Props) {
               onChange={(v) => setStudio((s) => ({ ...s, ...v }))}
               disabled={busy}
               lyricsRef={lyricsRef}
+              voiceChoices={tracks
+                .filter((t) => !t.missing)
+                .slice(0, 40)
+                .map((t) => ({ id: t.id, title: t.title }))}
             />
           </div>
         )}

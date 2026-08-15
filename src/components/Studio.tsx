@@ -22,6 +22,7 @@ export interface StudioValues {
   quality: "best" | "fast";
   variations: number;
   format: "mp3" | "wav24";
+  voiceFrom: string;
 }
 
 interface Props {
@@ -29,9 +30,13 @@ interface Props {
   onChange: (v: Partial<StudioValues>) => void;
   disabled: boolean;
   lyricsRef: React.RefObject<HTMLTextAreaElement>;
+  /** Tracks that can act as a voice reference. */
+  voiceChoices: Array<{ id: string; title: string }>;
 }
 
-export default function Studio({ values, onChange, disabled, lyricsRef }: Props) {
+export default function Studio({
+  values, onChange, disabled, lyricsRef, voiceChoices,
+}: Props) {
   /** Insert a tag at the cursor, keeping focus where the user was typing. */
   function insertTag(tag: string) {
     const el = lyricsRef.current;
@@ -180,6 +185,31 @@ export default function Studio({ values, onChange, disabled, lyricsRef }: Props)
         </div>
       </div>
 
+      {voiceChoices.length > 0 && (
+        <div className="field">
+          <label htmlFor="voiceFrom">Sing it in the voice from…</label>
+          <select
+            id="voiceFrom"
+            value={values.voiceFrom}
+            onChange={(e) => onChange({ voiceFrom: e.target.value })}
+            disabled={disabled}
+            aria-describedby="voice-hint"
+          >
+            <option value="">A new voice each time</option>
+            {voiceChoices.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.title}
+              </option>
+            ))}
+          </select>
+          <p className="hint" id="voice-hint">
+            Borrows the singer's tone from a song you already have, without
+            copying its tune or words — so one voice can carry across everything
+            you make. Works with imported recordings too.
+          </p>
+        </div>
+      )}
+
       <div className="field">
         <label htmlFor="quality">Sound quality</label>
         <select
@@ -232,5 +262,6 @@ export function studioToOptions(v: StudioValues): Partial<GenerateOptions> {
     quality: v.quality,
     variations: v.variations,
     format: v.format,
+    voice_from: v.voiceFrom || null,
   };
 }
