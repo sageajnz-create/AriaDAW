@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { reportError } from "./api";
 
 /**
  * Catches render errors so a bug shows itself instead of hiding.
@@ -24,6 +25,11 @@ export default class ErrorBoundary extends Component<{ children: ReactNode }, St
   componentDidCatch(error: Error, info: ErrorInfo) {
     this.setState({ info: info.componentStack ?? null });
     console.error("Aria UI error:", error, info);
+    // Persist it: a desktop window has no console to open.
+    void reportError(
+      error.message || String(error),
+      `${error.stack ?? ""}\n${info.componentStack ?? ""}`,
+    );
   }
 
   render() {

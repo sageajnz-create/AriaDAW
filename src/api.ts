@@ -119,6 +119,20 @@ export async function openFolder(): Promise<void> {
   await invoke<void>("open_library_folder");
 }
 
+/** Write a UI error where it can be read later. Never throws. */
+export async function reportError(message: string, stack?: string): Promise<void> {
+  try {
+    if (!isDesktop) {
+      console.error("Aria UI error:", message, stack);
+      return;
+    }
+    const { invoke } = await tauri();
+    await invoke("log_ui_error", { message, stack });
+  } catch {
+    /* reporting must never itself break the app */
+  }
+}
+
 /** Subscribe to a backend event. Returns an unsubscribe function. */
 export async function onEvent<T>(
   name: string,

@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import ErrorBoundary from "./ErrorBoundary";
 import { installRepaintOnRestore } from "./repaint";
+import { reportError } from "./api";
 import "./styles.css";
 
 // Safety net for WebKitGTK failing to redraw after the window is hidden.
@@ -34,10 +35,15 @@ function showFatal(message: string) {
   root.querySelector("#aria-reload")?.addEventListener("click", () => window.location.reload());
 }
 
-window.addEventListener("error", (e) => showFatal(e.message || String(e.error)));
-window.addEventListener("unhandledrejection", (e) =>
-  showFatal(String((e as PromiseRejectionEvent).reason)),
-);
+window.addEventListener("error", (e) => {
+  void reportError(e.message || String(e.error), e.error?.stack);
+  showFatal(e.message || String(e.error));
+});
+window.addEventListener("unhandledrejection", (e) => {
+  const reason = (e as PromiseRejectionEvent).reason;
+  void reportError(String(reason), reason?.stack);
+  showFatal(String(reason));
+});
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

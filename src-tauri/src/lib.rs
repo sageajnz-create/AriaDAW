@@ -221,6 +221,31 @@ fn stem_choices() -> Vec<derive::StemChoice> {
     derive::stem_choices()
 }
 
+/// Record a UI error to a file next to the library.
+///
+/// A desktop window has no console anyone can open, so a JavaScript error is
+/// invisible — the screen just goes blank. Writing them down turns "it went
+/// grey" into something with a stack trace.
+#[tauri::command]
+fn log_ui_error(state: State<'_, Arc<AppState>>, message: String, stack: Option<String>) {
+    let path = state
+        .settings_path
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("ui-errors.log");
+    let entry = format!(
+        "\n=== {} ===\n{}\n{}\n",
+        now_secs(),
+        message,
+        stack.unwrap_or_default()
+    );
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = f.write_all(entry.as_bytes());
+    }
+    eprintln!("[ui error] {message}");
+}
+
 /// Make a new track from an existing one: isolate a stem, restyle it, redo a
 /// section, or make it longer. Same event contract as `generate`.
 #[tauri::command]
@@ -775,6 +800,7 @@ pub fn run() {
             open_library_folder,
             stem_choices,
             derive_track,
+            log_ui_error,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Aria");
