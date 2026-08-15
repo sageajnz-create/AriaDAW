@@ -50,6 +50,8 @@ export interface GenerateOptions {
   timesignature?: string | null;
   vocal_language?: string | null;
   seed?: number | null;
+  /** "best" (SFT, 50 steps) or "fast" (turbo, 8 steps). */
+  quality?: "best" | "fast";
 }
 
 /** Stages the backend reports while a song is being made. */

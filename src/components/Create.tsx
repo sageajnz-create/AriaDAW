@@ -38,6 +38,7 @@ export default function Create({ onCreated, engineReady }: Props) {
     // On by default: turning it off produces skeletal lyrics and often no
     // vocals at all. See GenerateOptions::embellish in the Rust side.
     embellish: true,
+    quality: "best",
   });
   const jobRef = useRef<string | null>(null);
   const lyricsRef = useRef<HTMLTextAreaElement>(null);

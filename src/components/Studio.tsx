@@ -19,6 +19,7 @@ export interface StudioValues {
   keyscale: string;
   seed: string;
   embellish: boolean;
+  quality: "best" | "fast";
 }
 
 interface Props {
@@ -141,6 +142,24 @@ export default function Studio({ values, onChange, disabled, lyricsRef }: Props)
       </div>
 
       <div className="field">
+        <label htmlFor="quality">Sound quality</label>
+        <select
+          id="quality"
+          value={values.quality}
+          onChange={(e) => onChange({ quality: e.target.value as "best" | "fast" })}
+          disabled={disabled}
+          aria-describedby="quality-hint"
+        >
+          <option value="best">Best — richer sound, about 10 seconds longer</option>
+          <option value="fast">Fast — quicker to hear an idea</option>
+        </select>
+        <p className="hint" id="quality-hint">
+          Best uses a slower, more detailed model. Both are free and unlimited —
+          this is only about how long you wait.
+        </p>
+      </div>
+
+      <div className="field">
         <label className="check" htmlFor="embellish">
           <input
             id="embellish"
@@ -170,5 +189,6 @@ export function studioToOptions(v: StudioValues): Partial<GenerateOptions> {
     keyscale: v.keyscale || null,
     seed: v.seed ? Number(v.seed) : null,
     embellish: v.embellish,
+    quality: v.quality,
   };
 }

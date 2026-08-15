@@ -123,6 +123,24 @@ pub struct AvailableModels {
 }
 
 impl AvailableModels {
+    /// Largest installed language model. Lyric quality and consistency scale
+    /// noticeably with size — the 1.7B writes real verses on one run and bare
+    /// vocalisations on the next — so prefer the biggest one present.
+    pub fn best_lm(&self) -> Option<String> {
+        let rank = |n: &str| {
+            if n.contains("-4B-") {
+                3
+            } else if n.contains("-1.7B-") {
+                2
+            } else if n.contains("-0.6B-") {
+                1
+            } else {
+                0
+            }
+        };
+        self.lm.iter().max_by_key(|n| rank(n)).cloned()
+    }
+
     pub fn is_complete(&self) -> bool {
         !self.lm.is_empty()
             && !self.embedding.is_empty()

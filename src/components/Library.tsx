@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api, formatDate, formatDuration, trackAudioUrl } from "../api";
 import { isDesktop } from "../preview";
 import type { Track } from "../types";
@@ -11,36 +11,21 @@ interface Props {
 export default function Library({ tracks, onChanged }: Props) {
   const [openLyrics, setOpenLyrics] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
-  const [urls, setUrls] = useState<Record<string, string>>({});
+  const [playError, setPlayError] = useState<Record<string, string>>({});
 
-  // Load audio as blob URLs, and revoke them on unmount so we don't leak.
-  useEffect(() => {
-    let cancelled = false;
-    const created: string[] = [];
-    (async () => {
-      const next: Record<string, string> = {};
-      for (const t of tracks) {
-        try {
-          const u = await trackAudioUrl(t.id);
-          if (u) {
-            next[t.id] = u;
-            created.push(u);
-          }
-        } catch (e) {
-          console.error("could not load audio for", t.id, e);
-        }
-      }
-      if (cancelled) {
-        created.forEach((u) => URL.revokeObjectURL(u));
-      } else {
-        setUrls(next);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      created.forEach((u) => URL.revokeObjectURL(u));
+  /** Turn a MediaError into something a person can act on — and something
+   *  specific enough to debug from, rather than "an error". */
+  function describeMediaError(el: HTMLAudioElement): string {
+    const e = el.error;
+    if (!e) return "Playback failed for an unknown reason.";
+    const map: Record<number, string> = {
+      1: "Playback was aborted.",
+      2: "A network error stopped playback.",
+      3: "This file could not be decoded. Your system may be missing an MP3 decoder.",
+      4: "This audio source isn't supported by the app's player.",
     };
-  }, [tracks]);
+    return `${map[e.code] ?? "Playback failed."} (code ${e.code}${e.message ? `: ${e.message}` : ""})`;
+  }
 
   if (tracks.length === 0) {
     return (
@@ -66,7 +51,7 @@ export default function Library({ tracks, onChanged }: Props) {
     <ul className="tracks">
       {tracks.map((t) => {
         const lyricsOpen = openLyrics === t.id;
-        const src = urls[t.id];
+        const src = trackAudioUrl(t.id);
         return (
           <li key={t.id} className="track">
             <div className="track-top">
@@ -113,9 +98,33 @@ export default function Library({ tracks, onChanged }: Props) {
             </div>
 
             {src ? (
-              <audio controls preload="none" src={src}>
-                Your browser cannot play audio.
-              </audio>
+              <>
+                <audio
+                  controls
+                  preload="metadata"
+                  src={src}
+                  onError={(e) =>
+                    setPlayError((p) => ({
+                      ...p,
+                      [t.id]: describeMediaError(e.currentTarget),
+                    }))
+                  }
+                  onPlaying={() =>
+                    setPlayError((p) => {
+                      const { [t.id]: _drop, ...rest } = p;
+                      return rest;
+                    })
+                  }
+                >
+                  Your browser cannot play audio.
+                </audio>
+                {playError[t.id] && (
+                  <p className="notice notice-err" role="alert" style={{ marginTop: 8 }}>
+                    {playError[t.id]} The file itself is fine — open your music
+                    folder to play it in another app.
+                  </p>
+                )}
+              </>
             ) : (
               !isDesktop && (
                 <p className="hint" style={{ marginTop: 12 }}>

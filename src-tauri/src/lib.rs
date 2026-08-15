@@ -72,6 +72,9 @@ pub struct GenerateOptions {
     pub vocal_language: Option<String>,
     #[serde(default)]
     pub seed: Option<i64>,
+    /// "fast" (turbo, 8 steps) or "best" (SFT, 50 steps).
+    #[serde(default)]
+    pub quality: Option<String>,
 }
 
 fn default_duration() -> f64 {
@@ -300,15 +303,26 @@ fn attempt_generation(
 ) -> anyhow::Result<Track> {
     let models = st.engine.lock().unwrap().paths.available_models()?;
     let lm_model = models
-        .lm
-        .first()
-        .cloned()
+        .best_lm()
         .ok_or_else(|| anyhow::anyhow!("no language model installed"))?;
-    let dit_model = models
-        .dit_turbo
-        .first()
-        .cloned()
-        .ok_or_else(|| anyhow::anyhow!("no turbo model installed"))?;
+
+    // "Best" uses the SFT diffusion model at 50 steps; "fast" uses turbo at 8.
+    // Measured end to end on a 60s song: 33s vs 23s. Ten seconds is a cheap
+    // price for noticeably better production, so best is the default and fast
+    // is opt-in — the opposite of how a paid service would meter it.
+    let best_quality = opts.quality.as_deref() != Some("fast");
+    let (dit_model, steps, shift) = match (best_quality, models.dit_sft.first()) {
+        (true, Some(sft)) => (sft.clone(), 50, 1.0),
+        _ => (
+            models
+                .dit_turbo
+                .first()
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("no turbo model installed"))?,
+            8,
+            3.0,
+        ),
+    };
 
     // --- stage 1: lyrics, musical metadata, audio codes ---------------------
     emit_stage(app, job_id, "writing", "Writing the song");
@@ -340,9 +354,12 @@ fn attempt_generation(
         "caption": caption,
         "lyrics": lyrics,
         "duration": opts.duration,
-        "inference_steps": 8,
+        "inference_steps": steps,
         "guidance_scale": 1.0,
-        "shift": 3.0,
+        "shift": shift,
+        // Upstream defaults to 128 kbps, which is audibly lossy on music.
+        // Encoding runs at ~58x realtime, so the higher rate costs nothing.
+        "mp3_bitrate": 320,
     });
     // See `embellish`: leaving expansion on lets the model's CoT override the
     // requested language, so it stays off unless explicitly asked for.
@@ -455,6 +472,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .register_uri_scheme_protocol("aria", |ctx, request| {
+            serve_track(ctx.app_handle(), request)
+        })
         .setup(|app| {
             let data_dir = app
                 .path()
@@ -490,7 +510,6 @@ pub fn run() {
             languages,
             default_language,
             audio_output_available,
-            read_track_audio,
             open_library_folder,
         ])
         .run(tauri::generate_context!())
@@ -533,28 +552,85 @@ fn language_name(code: &str) -> String {
         .unwrap_or_else(|| "English".to_string())
 }
 
-/// Read a track's audio as raw bytes.
+/// Serve a track over our own `aria://` URI scheme.
 ///
-/// The webview plays these from a blob URL rather than Tauri's asset protocol.
-/// The asset path has to clear a scope pattern, the custom protocol, and the
-/// CSP, and a failure anywhere in that chain surfaces as an unexplained "error
-/// trying to play". Handing over bytes we already have on disk removes the whole
-/// class of problem; a song is around a megabyte, so the cost is nothing.
-#[tauri::command]
-fn read_track_audio(
-    state: State<'_, Arc<AppState>>,
-    id: String,
-) -> Result<tauri::ipc::Response, String> {
-    let track = state
-        .library
-        .lock()
-        .unwrap()
-        .get(&id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "no such track".to_string())?;
-    let bytes = std::fs::read(&track.audio_path)
-        .map_err(|e| format!("could not read {}: {e}", track.audio_path))?;
-    Ok(tauri::ipc::Response::new(bytes))
+/// Third approach to playback, after the asset protocol and blob URLs both
+/// failed on WebKitGTK. Those failures were opaque — the player appeared, then
+/// erroring on play with nothing in the app log.
+///
+/// A scheme we implement ourselves has no scope pattern to satisfy and no
+/// CSP interaction, and WebKit's media stack is happiest with an ordinary
+/// HTTP-shaped response. Range requests are handled so the scrubber works;
+/// without `Accept-Ranges` WebKit will refuse to seek and may refuse to start.
+fn serve_track(
+    app: &AppHandle,
+    request: tauri::http::Request<Vec<u8>>,
+) -> tauri::http::Response<Vec<u8>> {
+    use tauri::http::{header, status::StatusCode, Response};
+
+    let not_found = || {
+        Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .body(Vec::new())
+            .unwrap()
+    };
+
+    // aria://localhost/track/<id>
+    let id = match request.uri().path().strip_prefix("/track/") {
+        Some(i) if !i.is_empty() => i.to_string(),
+        _ => return not_found(),
+    };
+
+    let state = app.state::<Arc<AppState>>();
+    let track = match state.library.lock().unwrap().get(&id) {
+        Ok(Some(t)) => t,
+        _ => return not_found(),
+    };
+    let bytes = match std::fs::read(&track.audio_path) {
+        Ok(b) => b,
+        Err(_) => return not_found(),
+    };
+    let total = bytes.len() as u64;
+
+    // Honour a single-range request; that is all a media element issues.
+    let range = request
+        .headers()
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("bytes="))
+        .and_then(|v| {
+            let (a, b) = v.split_once('-')?;
+            let start: u64 = a.parse().ok()?;
+            let end: u64 = if b.is_empty() {
+                total.saturating_sub(1)
+            } else {
+                b.parse().ok()?
+            };
+            (start <= end && start < total).then_some((start, end.min(total - 1)))
+        });
+
+    match range {
+        Some((start, end)) => {
+            let slice = bytes[start as usize..=end as usize].to_vec();
+            Response::builder()
+                .status(StatusCode::PARTIAL_CONTENT)
+                .header(header::CONTENT_TYPE, "audio/mpeg")
+                .header(header::ACCEPT_RANGES, "bytes")
+                .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{total}"))
+                .header(header::CONTENT_LENGTH, slice.len())
+                .header(header::CACHE_CONTROL, "no-store")
+                .body(slice)
+                .unwrap()
+        }
+        None => Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, "audio/mpeg")
+            .header(header::ACCEPT_RANGES, "bytes")
+            .header(header::CONTENT_LENGTH, total)
+            .header(header::CACHE_CONTROL, "no-store")
+            .body(bytes)
+            .unwrap(),
+    }
 }
 
 /// Open the user's music folder in their file manager.

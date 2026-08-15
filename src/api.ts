@@ -82,18 +82,17 @@ export const api = {
 };
 
 /**
- * A playable URL for a track.
+ * A playable URL for a track, served by our own `aria://` scheme.
  *
- * Reads the bytes over IPC and wraps them in a blob URL instead of using the
- * asset protocol, which has to satisfy a scope pattern, a custom protocol and
- * the CSP — and fails as an unexplained "error trying to play" if any link in
- * that chain is off. Blob URLs seek fine and a song is about a megabyte.
+ * Windows and Android route custom schemes through an http:// host; the others
+ * use the scheme directly.
  */
-export async function trackAudioUrl(id: string): Promise<string> {
+export function trackAudioUrl(id: string): string {
   if (!isDesktop) return "";
-  const { invoke } = await tauri();
-  const data = await invoke<ArrayBuffer>("read_track_audio", { id });
-  return URL.createObjectURL(new Blob([data], { type: "audio/mpeg" }));
+  const isWindowsish = navigator.userAgent.includes("Windows");
+  return isWindowsish
+    ? `http://aria.localhost/track/${encodeURIComponent(id)}`
+    : `aria://localhost/track/${encodeURIComponent(id)}`;
 }
 
 /** Open the music folder in the system file manager. */
