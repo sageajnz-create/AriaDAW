@@ -98,6 +98,34 @@ export const api = {
     return (await tauri()).invoke<string>("import_audio", { path });
   },
 
+  setupInfo: async (tier?: string): Promise<import("./types").SetupInfo> => {
+    if (!isDesktop) {
+      // First-run setup is, by design, seen once. `?setup` in the browser
+      // preview forces it so the screen can be reviewed without wiping models.
+      const forced = new URLSearchParams(location.search).has("setup");
+      const t = (tier as "light" | "standard" | "best") ?? "standard";
+      return {
+        tier: t, tier_label: t[0].toUpperCase() + t.slice(1),
+        tier_description: t === "light"
+          ? "Works on almost any computer, including without a graphics card. Songs take longer and the words are simpler."
+          : t === "best"
+            ? "The best words and the fullest sound. Needs a graphics card with 8 GB or more."
+            : "A good balance. Needs a graphics card with about 6 GB.",
+        vram_mb: 8176,
+        total_bytes: 8.5e9,
+        missing_bytes: forced ? 8.5e9 : 0,
+        missing_count: forced ? 5 : 0,
+        ready: !forced,
+      };
+    }
+    return (await tauri()).invoke("setup_info", { tier });
+  },
+
+  downloadModels: async (tier: string): Promise<void> => {
+    if (!isDesktop) return;
+    return (await tauri()).invoke("download_models", { tier });
+  },
+
   audioOutputAvailable: async (): Promise<boolean> => {
     if (!isDesktop) return true;
     return (await tauri()).invoke<boolean>("audio_output_available");

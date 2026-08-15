@@ -6,6 +6,7 @@ mod derive;
 mod engine;
 mod library;
 mod lyrics;
+mod models;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -332,6 +333,82 @@ fn run_import(
     drop(lib);
 
     let _ = app.emit("gen:done", json!({ "job_id": job_id, "track": track }));
+    Ok(())
+}
+
+/// What the first-run setup needs to show: which tier suits this machine, how
+/// much still has to be downloaded, and whether anything is missing.
+#[derive(Debug, Serialize)]
+pub struct SetupInfo {
+    tier: models::Tier,
+    tier_label: &'static str,
+    tier_description: &'static str,
+    vram_mb: Option<u64>,
+    total_bytes: u64,
+    missing_bytes: u64,
+    missing_count: usize,
+    ready: bool,
+}
+
+#[tauri::command]
+async fn setup_info(
+    state: State<'_, Arc<AppState>>,
+    tier: Option<models::Tier>,
+) -> Result<SetupInfo, String> {
+    let st = Arc::clone(&state);
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = st.engine.lock().unwrap().paths.models_dir.clone();
+        let tier = tier.unwrap_or_else(models::suggested_tier);
+        let missing = models::missing_files(&dir, tier);
+        SetupInfo {
+            tier,
+            tier_label: tier.label(),
+            tier_description: tier.description(),
+            vram_mb: models::detect_vram_mb(),
+            total_bytes: tier.total_bytes(),
+            missing_bytes: missing.iter().map(|f| f.bytes).sum(),
+            missing_count: missing.len(),
+            ready: missing.is_empty(),
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// Fetch whatever a tier is missing. Progress arrives as `setup:progress`, and
+/// it ends with `setup:done` or `setup:error`.
+#[tauri::command]
+fn download_models(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    tier: models::Tier,
+) -> Result<(), String> {
+    let st = Arc::clone(&state);
+    let dir = st.engine.lock().unwrap().paths.models_dir.clone();
+
+    std::thread::spawn(move || {
+        let app2 = app.clone();
+        let result = models::download_tier(
+            &dir,
+            tier,
+            move |p| {
+                let _ = app2.emit("setup:progress", &p);
+            },
+            || false,
+        );
+        match result {
+            Ok(()) => {
+                // Restart so the engine picks up what just arrived.
+                let mut eng = st.engine.lock().unwrap();
+                eng.stop();
+                drop(eng);
+                let _ = app.emit("setup:done", json!({}));
+            }
+            Err(e) => {
+                let _ = app.emit("setup:error", json!({ "message": e.to_string() }));
+            }
+        }
+    });
     Ok(())
 }
 
@@ -1008,6 +1085,8 @@ pub fn run() {
             derive_track,
             audio_base_url,
             import_audio,
+            setup_info,
+            download_models,
             log_ui_error,
         ])
         .run(tauri::generate_context!())

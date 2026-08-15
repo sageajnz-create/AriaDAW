@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Create from "./components/Create";
 import LibraryView from "./components/Library";
+import Setup from "./components/Setup";
 import { api, loadAudioBase, onEvent, openFolder, pickAudioFile } from "./api";
 import { isDesktop } from "./preview";
 import type { EngineStatus, Track } from "./types";
@@ -20,6 +21,9 @@ export default function App() {
   // first take is playable, which used to leave the remaining takes rendering
   // out of sight — it looked like only one had been made.
   const [working, setWorking] = useState<string | null>(null);
+  // Null until we've checked; true when models still need downloading. The
+  // whole app is unusable without them, so setup takes over the window.
+  const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
   const [importing, setImporting] = useState(false);
 
   // Bringing in your own recording unlocks every derived operation on it —
@@ -60,6 +64,17 @@ export default function App() {
     (async () => {
       // Must run before the library renders, or track URLs come out empty.
       await loadAudioBase();
+
+      // Don't start the engine before the models exist — it would fail in a
+      // way that reads like a broken app rather than an unfinished setup.
+      try {
+        const setup = await api.setupInfo();
+        setNeedsSetup(!setup.ready);
+        if (!setup.ready) return;
+      } catch {
+        setNeedsSetup(false);
+      }
+
       await refreshStatus();
       await refreshTracks();
       setCanPlayAudio(await api.audioOutputAvailable());
@@ -145,6 +160,26 @@ export default function App() {
           </div>
         </header>
 
+        {needsSetup && (
+          <main className="panel" id="main">
+            <Setup
+              onReady={async () => {
+                setNeedsSetup(false);
+                await refreshStatus();
+                await refreshTracks();
+                try {
+                  await api.startEngine();
+                } catch (e) {
+                  setBootError(String(e));
+                }
+                await refreshStatus();
+              }}
+            />
+          </main>
+        )}
+
+        {!needsSetup && (
+        <>
         <div className="tabs" role="tablist" aria-label="Sections">
           <button
             type="button"
@@ -232,6 +267,8 @@ export default function App() {
             </div>
           )}
         </main>
+        </>
+        )}
 
         <footer className="footer">
           <span>

@@ -77,3 +77,25 @@ export interface StageEvent {
   stage: Stage;
   detail: string;
 }
+
+export type Tier = "light" | "standard" | "best";
+
+export interface SetupInfo {
+  tier: Tier;
+  tier_label: string;
+  tier_description: string;
+  vram_mb: number | null;
+  total_bytes: number;
+  missing_bytes: number;
+  missing_count: number;
+  ready: boolean;
+}
+
+export interface SetupProgress {
+  file: string;
+  role: string;
+  file_index: number;
+  file_count: number;
+  downloaded: number;
+  total: number;
+}

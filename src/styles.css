@@ -509,6 +509,54 @@ audio { width: 100%; margin-top: 13px; }
 }
 .empty h3 { color: var(--text-dim); font-weight: 600; margin: 0 0 8px; }
 
+/* --- first-run setup ---------------------------------------------------- */
+.setup { max-width: 720px; padding-top: 8px; }
+.setup h2 { font-size: 1.4rem; margin: 0 0 10px; }
+.setup-lead { color: var(--text-dim); margin: 0 0 24px; max-width: 62ch; }
+
+.tier-list { display: grid; gap: 10px; }
+.tier {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.tier:hover { border-color: var(--accent); }
+.tier-on { border-color: var(--accent); background: var(--surface-2); }
+.tier-name { font-weight: 650; display: flex; align-items: center; gap: 10px; }
+.tier-tag {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--accent-ink);
+  background: var(--accent);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+.tier-desc { color: var(--text-dim); font-size: 0.9rem; }
+
+/* Progress bar. Paired with a percentage in text, so it never depends on
+   colour or width alone to convey where things are. */
+.bar {
+  height: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 14px;
+}
+.bar-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
 /* --- footer ------------------------------------------------------------- */
 .footer {
   border-top: 1px solid var(--border);

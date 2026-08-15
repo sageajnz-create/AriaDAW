@@ -26,16 +26,40 @@
       "csp": null,
       "assetProtocol": {
         "enable": true,
-        "scope": ["$AUDIO/Aria/**", "$APPDATA/audio/**"]
+        "scope": [
+          "$AUDIO/Aria/**",
+          "$APPDATA/audio/**"
+        ]
       }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["appimage", "deb"],
-    "icon": ["icons/icon.png"],
+    "targets": [
+      "appimage",
+      "deb"
+    ],
+    "icon": [
+      "icons/icon.png"
+    ],
     "category": "Music",
     "shortDescription": "Free, unlimited, local AI music creation",
-    "longDescription": "Aria generates complete songs with vocals entirely on your own computer. No account, no credits, no subscription. Everything you make is yours."
+    "longDescription": "Aria generates complete songs with vocals entirely on your own computer. No account, no credits, no subscription. Everything you make is yours.",
+    "resources": {},
+    "externalBin": [
+      "binaries/ace-server"
+    ],
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0",
+          "gstreamer1.0-plugins-base",
+          "gstreamer1.0-plugins-good",
+          "libvulkan1",
+          "mesa-vulkan-drivers"
+        ]
+      }
+    }
   }
 }
