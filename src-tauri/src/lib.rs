@@ -3,6 +3,7 @@
 mod client;
 mod engine;
 mod library;
+mod lyrics;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -75,6 +76,10 @@ pub struct GenerateOptions {
     /// "fast" (turbo, 8 steps) or "best" (SFT, 50 steps).
     #[serde(default)]
     pub quality: Option<String>,
+    /// Sampling temperature for lyric writing. Higher wanders more and repeats
+    /// more; lower is plainer but coherent.
+    #[serde(default)]
+    pub lyric_variety: Option<f64>,
 }
 
 fn default_duration() -> f64 {
@@ -312,8 +317,48 @@ fn attempt_generation(
     // metering it.
     let best_quality = opts.quality.as_deref() != Some("fast");
 
-    let lm_model = if best_quality { models.best_lm() } else { models.fastest_lm() }
-        .ok_or_else(|| anyhow::anyhow!("no language model installed"))?;
+    // --- words -------------------------------------------------------------
+    // Prefer a real instruct model for lyrics. ACE-Step's own writer produced
+    // 13% distinct lines, drifted between languages, and often sang only
+    // vocalisations; llama3.2:3b produced 100% distinct, on-topic lines in the
+    // requested language in ~13s. See lyrics.rs.
+    let language = opts
+        .vocal_language
+        .clone()
+        .filter(|l| !l.trim().is_empty())
+        .unwrap_or_else(default_vocal_language);
+
+    let mut lyrics = if opts.instrumental {
+        "[Instrumental]".to_string()
+    } else {
+        opts.lyrics.trim().to_string()
+    };
+    let mut lyricist: Option<String> = None;
+
+    if lyrics.is_empty() {
+        if let Some(writer) = lyrics::LyricWriter::detect() {
+            emit_stage(app, job_id, "writing", "Writing the words");
+            match writer.write(&opts.prompt, &language_name(&language), opts.duration) {
+                Ok(text) => {
+                    lyricist = Some(writer.model_name().to_string());
+                    lyrics = text;
+                }
+                // Not fatal: fall through and let ACE-Step write them instead.
+                Err(e) => eprintln!("lyric model failed, falling back: {e}"),
+            }
+        }
+    }
+
+    // With lyrics in hand the ACE language model only has to emit audio codes,
+    // which the small model does just as well and roughly twice as fast
+    // (9s vs 17s measured). Only reach for the large one when it must write.
+    let needs_writer = lyrics.is_empty();
+    let lm_model = if best_quality && needs_writer {
+        models.best_lm()
+    } else {
+        models.fastest_lm().or_else(|| models.best_lm())
+    }
+    .ok_or_else(|| anyhow::anyhow!("no language model installed"))?;
 
     let (dit_model, steps, shift) = match (best_quality, models.dit_sft.first()) {
         (true, Some(sft)) => (sft.clone(), 50, 1.0),
@@ -328,28 +373,21 @@ fn attempt_generation(
         ),
     };
 
-    // --- stage 1: lyrics, musical metadata, audio codes ---------------------
-    emit_stage(app, job_id, "writing", "Writing the song");
+    // --- stage 1: musical metadata and audio codes --------------------------
+    emit_stage(app, job_id, "composing", "Composing the music");
 
-    let lyrics = if opts.instrumental { "[Instrumental]".to_string() } else { opts.lyrics.clone() };
-
-    // Nudge the language through the caption. The `vocal_language` field is
-    // echoed back but does not steer lyric writing — the library recorded "en"
-    // on a song whose lyrics were Norwegian. Naming it in the caption is not
-    // perfectly reliable either, but it's the only lever that works at all
-    // without disabling expansion (which costs the vocals themselves).
-    let language = opts
-        .vocal_language
-        .clone()
-        .filter(|l| !l.trim().is_empty())
-        .unwrap_or_else(default_vocal_language);
-    let caption = if opts.instrumental {
-        opts.prompt.clone()
-    } else {
-        format!("{}. Sung in {}, with {} lyrics.",
+    // Only nudge language through the caption when ACE-Step is writing the
+    // words itself. When we supply lyrics, the language is already settled and
+    // the caption should stay purely about the music.
+    let caption = if needs_writer && !opts.instrumental {
+        format!(
+            "{}. Sung in {}, with {} lyrics.",
             opts.prompt.trim_end_matches(['.', ' ']),
             language_name(&language),
-            language_name(&language))
+            language_name(&language)
+        )
+    } else {
+        opts.prompt.clone()
     };
 
     let mut req = json!({
@@ -364,6 +402,14 @@ fn attempt_generation(
         // Upstream defaults to 128 kbps, which is audibly lossy on music.
         // Encoding runs at ~58x realtime, so the higher rate costs nothing.
         "mp3_bitrate": 320,
+        // The engine's default temperature of 0.85 is far too loose for lyrics
+        // and collapses into repetition. Measured over the same prompt, share
+        // of distinct lines:
+        //   t=0.85  13%   ("I talk talk talk talk talk", 56 lines / ~7 unique)
+        //   t=0.65  52%   but 12% of lines were vocalisations
+        //   t=0.45  48%   and no vocalisations at all
+        // 0.45 gives nearly the best variety with none of the filler.
+        "lm_temperature": opts.lyric_variety.unwrap_or(0.45),
     });
     // See `embellish`: leaving expansion on lets the model's CoT override the
     // requested language, so it stays off unless explicitly asked for.
@@ -425,6 +471,7 @@ fn attempt_generation(
         parent_id: None,
         operation: None,
         favorite: false,
+        lyricist: lyricist.clone(),
     };
     lib.insert(&track)?;
     Ok(track)

@@ -33,6 +33,9 @@ pub struct Track {
     pub parent_id: Option<String>,
     pub operation: Option<String>,
     pub favorite: bool,
+    /// Which model wrote the words, when it wasn't the user or ACE-Step itself.
+    #[serde(default)]
+    pub lyricist: Option<String>,
 }
 
 pub struct Library {
@@ -80,6 +83,14 @@ impl Library {
             "#,
         )?;
 
+        // Migrations. `CREATE TABLE IF NOT EXISTS` does nothing for a database
+        // that already exists, so new columns have to be added explicitly.
+        // Adding a column that is already there is not an error worth failing
+        // startup over — losing someone's library to a schema tweak would be.
+        for stmt in ["ALTER TABLE tracks ADD COLUMN lyricist TEXT"] {
+            let _ = conn.execute(stmt, []);
+        }
+
         Ok(Self { conn, audio_dir: audio_dir.to_path_buf() })
     }
 
@@ -87,13 +98,14 @@ impl Library {
         self.conn.execute(
             r#"INSERT INTO tracks
                (id,title,prompt,caption,lyrics,bpm,keyscale,timesignature,vocal_language,
-                duration,seed,model,audio_path,latent_path,created_at,parent_id,operation,favorite)
-               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)"#,
+                duration,seed,model,audio_path,latent_path,created_at,parent_id,operation,favorite,
+                lyricist)
+               VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)"#,
             params![
                 t.id, t.title, t.prompt, t.caption, t.lyrics, t.bpm, t.keyscale,
                 t.timesignature, t.vocal_language, t.duration, t.seed, t.model,
                 t.audio_path, t.latent_path, t.created_at, t.parent_id, t.operation,
-                t.favorite as i32
+                t.favorite as i32, t.lyricist
             ],
         )?;
         Ok(())
@@ -102,7 +114,8 @@ impl Library {
     pub fn list(&self, limit: i64) -> Result<Vec<Track>> {
         let mut stmt = self.conn.prepare(
             "SELECT id,title,prompt,caption,lyrics,bpm,keyscale,timesignature,vocal_language,
-                    duration,seed,model,audio_path,latent_path,created_at,parent_id,operation,favorite
+                    duration,seed,model,audio_path,latent_path,created_at,parent_id,operation,favorite,
+                    lyricist
              FROM tracks ORDER BY created_at DESC LIMIT ?1",
         )?;
         let rows = stmt.query_map([limit], row_to_track)?;
@@ -112,7 +125,8 @@ impl Library {
     pub fn get(&self, id: &str) -> Result<Option<Track>> {
         let mut stmt = self.conn.prepare(
             "SELECT id,title,prompt,caption,lyrics,bpm,keyscale,timesignature,vocal_language,
-                    duration,seed,model,audio_path,latent_path,created_at,parent_id,operation,favorite
+                    duration,seed,model,audio_path,latent_path,created_at,parent_id,operation,favorite,
+                    lyricist
              FROM tracks WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map([id], row_to_track)?;
@@ -171,6 +185,7 @@ fn row_to_track(r: &rusqlite::Row) -> rusqlite::Result<Track> {
         parent_id: r.get(15)?,
         operation: r.get(16)?,
         favorite: r.get::<_, i32>(17)? != 0,
+        lyricist: r.get(18)?,
     })
 }
 
@@ -198,6 +213,7 @@ mod tests {
             parent_id: None,
             operation: None,
             favorite: false,
+            lyricist: None,
         }
     }
 

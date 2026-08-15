@@ -7,6 +7,7 @@ import type { StageEvent, Track } from "../types";
 /** Plain-language labels. No jargon — the person using this may not make music. */
 const STAGE_TEXT: Record<string, string> = {
   starting: "Warming up",
+  composing: "Composing the music",
   writing: "Writing the words and melody",
   rendering: "Recording the audio",
   recovering: "Adjusting for your computer",
