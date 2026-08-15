@@ -126,6 +126,12 @@ export const api = {
     return (await tauri()).invoke("download_models", { tier });
   },
 
+  /** A new song in the style of an existing one. */
+  remakeLike: async (id: string, keepWords: boolean): Promise<string> => {
+    if (!isDesktop) return `preview-remake-${Date.now()}`;
+    return (await tauri()).invoke<string>("remake_like", { id, keepWords });
+  },
+
   audioOutputAvailable: async (): Promise<boolean> => {
     if (!isDesktop) return true;
     return (await tauri()).invoke<boolean>("audio_output_available");

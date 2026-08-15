@@ -425,6 +425,71 @@ fn stem_choices() -> Vec<derive::StemChoice> {
     derive::stem_choices()
 }
 
+/// Make a new song in the style of one you already have.
+///
+/// Distinct from takes on purpose. Takes are the same words performed again;
+/// this is a different song that shares the style — the loop people actually
+/// want when something nearly works and they'd like another go at it. It reuses
+/// the description, tempo, key, language and duration, and writes fresh words
+/// and a fresh performance.
+///
+/// Deliberately does *not* reuse the seed: reusing it with the same settings
+/// would reproduce the same song, which is the opposite of what was asked for.
+#[tauri::command]
+fn remake_like(
+    app: AppHandle,
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    keep_words: bool,
+) -> Result<String, String> {
+    let track = state
+        .library
+        .lock()
+        .unwrap()
+        .get(&id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "that track is no longer in your library".to_string())?;
+
+    // An imported recording has no prompt of its own; its caption describes how
+    // it sounds, which is the next best thing to ask for more of.
+    let prompt = if track.prompt.trim().is_empty() {
+        track.caption.clone()
+    } else {
+        track.prompt.clone()
+    };
+    if prompt.trim().is_empty() {
+        return Err("there isn't enough saved about that track to make another".into());
+    }
+
+    let options = GenerateOptions {
+        prompt,
+        lyrics: if keep_words { track.lyrics.clone() } else { String::new() },
+        duration: if track.duration > 0.0 { track.duration } else { 60.0 },
+        instrumental: track.lyrics.trim() == "[Instrumental]",
+        embellish: true,
+        bpm: track.bpm,
+        keyscale: track.keyscale.clone(),
+        timesignature: track.timesignature.clone(),
+        vocal_language: track.vocal_language.clone(),
+        // Fresh seed: the whole point is a different song.
+        seed: None,
+        quality: Some(if track.model.contains("-xl-") {
+            "studio".into()
+        } else if track.model.contains("turbo") {
+            "fast".into()
+        } else {
+            "best".into()
+        }),
+        lyric_variety: None,
+        variations: Some(1),
+        format: Some(if track.audio_path.ends_with(".wav") { "wav24".into() } else { "mp3".into() }),
+        // Keep the singer, so a set of songs can hold together.
+        voice_from: Some(track.id.clone()),
+    };
+
+    generate(app, state, options)
+}
+
 /// Record a UI error to a file next to the library.
 ///
 /// A desktop window has no console anyone can open, so a JavaScript error is
@@ -1161,6 +1226,7 @@ pub fn run() {
             open_library_folder,
             stem_choices,
             derive_track,
+            remake_like,
             audio_base_url,
             import_audio,
             setup_info,

@@ -5,7 +5,7 @@ import type { StemChoice, Track } from "../types";
 /** Things you can make from a song you already have.
  *  Suno charges for stem separation and section editing; here they're just
  *  part of the app. */
-type Panel = "stems" | "extend" | "cover" | "section" | null;
+type Panel = "stems" | "extend" | "cover" | "section" | "more" | null;
 
 /** mm:ss for the section editor, where seconds matter. */
 function clock(seconds: number): string {
@@ -91,7 +91,60 @@ export default function Derive({ track, supportsStems, busy, onStarted }: Props)
         >
           Redo a section
         </button>
+        <button
+          type="button"
+          className="btn btn-icon"
+          onClick={() => setPanel(panel === "more" ? null : "more")}
+          aria-expanded={panel === "more"}
+          disabled={busy}
+          title="A new song in the same style"
+        >
+          More like this
+        </button>
       </div>
+
+      {panel === "more" && (
+        <div className="derive-panel">
+          <p className="hint" style={{ marginTop: 0 }}>
+            Makes a new song with this one's style, tempo, key and singer — so a
+            set of songs can hang together. Everything you have stays as it is.
+          </p>
+          <div className="btn-row">
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={async () => {
+                try {
+                  onStarted(await api.remakeLike(track.id, false));
+                  setPanel(null);
+                } catch (e) {
+                  console.error(e);
+                }
+              }}
+              disabled={busy}
+            >
+              New words and music
+            </button>
+            {track.lyrics && track.lyrics.trim() !== "[Instrumental]" && (
+              <button
+                type="button"
+                className="btn"
+                onClick={async () => {
+                  try {
+                    onStarted(await api.remakeLike(track.id, true));
+                    setPanel(null);
+                  } catch (e) {
+                    console.error(e);
+                  }
+                }}
+                disabled={busy}
+              >
+                Same words, new music
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {panel === "section" && (
         <div className="derive-panel">
