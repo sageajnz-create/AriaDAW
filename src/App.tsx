@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Create from "./components/Create";
 import LibraryView from "./components/Library";
-import { api, onEvent, openFolder } from "./api";
+import { api, loadAudioBase, onEvent, openFolder } from "./api";
 import { isDesktop } from "./preview";
 import type { EngineStatus, Track } from "./types";
 
@@ -37,6 +37,8 @@ export default function App() {
   // front rather than making the first song pay for it.
   useEffect(() => {
     (async () => {
+      // Must run before the library renders, or track URLs come out empty.
+      await loadAudioBase();
       await refreshStatus();
       await refreshTracks();
       setCanPlayAudio(await api.audioOutputAvailable());

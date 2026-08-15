@@ -1,5 +1,6 @@
 //! Aria — free, unlimited, local AI music creation.
 
+mod audio_server;
 mod client;
 mod derive;
 mod engine;
@@ -24,8 +25,10 @@ const MAX_DEVICE_LOST_RETRIES: usize = 3;
 
 pub struct AppState {
     engine: Mutex<Engine>,
-    library: Mutex<Library>,
+    library: Arc<Mutex<Library>>,
     settings_path: PathBuf,
+    /// Base URL of the local audio server, e.g. http://127.0.0.1:41234/<token>
+    audio_base: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -214,6 +217,12 @@ fn delete_track(state: State<'_, Arc<AppState>>, id: String) -> Result<(), Strin
 #[tauri::command]
 fn library_folder(state: State<'_, Arc<AppState>>) -> Result<String, String> {
     Ok(state.library.lock().unwrap().audio_dir.display().to_string())
+}
+
+/// Where the webview should fetch audio from.
+#[tauri::command]
+fn audio_base_url(state: State<'_, Arc<AppState>>) -> String {
+    state.audio_base.clone()
 }
 
 #[tauri::command]
@@ -766,18 +775,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        // Asynchronous on purpose. The synchronous form runs the handler on the
-        // main thread, which is the GTK event loop — and this handler does a
-        // database lookup plus a multi-megabyte file read. Opening the library
-        // fires one request per track at once, so the window stopped repainting
-        // and went grey exactly when a finished song appeared. Serving off-thread
-        // keeps the UI alive.
-        .register_asynchronous_uri_scheme_protocol("aria", |ctx, request, responder| {
-            let app = ctx.app_handle().clone();
-            std::thread::spawn(move || {
-                responder.respond(serve_track(&app, request));
-            });
-        })
         .setup(|app| {
             let data_dir = app
                 .path()
@@ -792,12 +789,20 @@ pub fn run() {
 
             let paths = EnginePaths::discover(app.path().resource_dir().ok().as_deref())
                 .map_err(|e| format!("{e}"))?;
-            let library = Library::open(&data_dir, &audio_dir)?;
+            let library = Arc::new(Mutex::new(Library::open(&data_dir, &audio_dir)?));
+
+            // Audio plays over loopback HTTP; see audio_server.rs for why every
+            // other transport failed.
+            let audio = audio_server::AudioServer::start(Arc::clone(&library))
+                .map_err(|e| format!("{e}"))?;
+            let audio_base = audio.base_url();
+            eprintln!("[audio] serving on {audio_base}");
 
             app.manage(Arc::new(AppState {
                 engine: Mutex::new(Engine::new(paths, settings)),
-                library: Mutex::new(library),
+                library,
                 settings_path,
+                audio_base,
             }));
             Ok(())
         })
@@ -816,6 +821,7 @@ pub fn run() {
             open_library_folder,
             stem_choices,
             derive_track,
+            audio_base_url,
             log_ui_error,
         ])
         .run(tauri::generate_context!())
@@ -856,93 +862,6 @@ fn language_name(code: &str) -> String {
         .find(|(c, _)| c == code)
         .map(|(_, n)| n)
         .unwrap_or_else(|| "English".to_string())
-}
-
-/// Serve a track over our own `aria://` URI scheme.
-///
-/// Third approach to playback, after the asset protocol and blob URLs both
-/// failed on WebKitGTK. Those failures were opaque — the player appeared, then
-/// erroring on play with nothing in the app log.
-///
-/// A scheme we implement ourselves has no scope pattern to satisfy and no
-/// CSP interaction, and WebKit's media stack is happiest with an ordinary
-/// HTTP-shaped response. Range requests are handled so the scrubber works;
-/// without `Accept-Ranges` WebKit will refuse to seek and may refuse to start.
-fn serve_track(
-    app: &AppHandle,
-    request: tauri::http::Request<Vec<u8>>,
-) -> tauri::http::Response<Vec<u8>> {
-    use tauri::http::{header, status::StatusCode, Response};
-
-    // Logged because a failure here surfaces in the UI only as "playback
-    // failed", with nothing to say why.
-    let deny = |why: &str| {
-        eprintln!("[aria://] {} -> {}", request.uri(), why);
-        Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Vec::new())
-            .unwrap()
-    };
-
-    // aria://localhost/track/<id>
-    let raw_path = request.uri().path().to_string();
-    let id = match raw_path.strip_prefix("/track/") {
-        Some(i) if !i.is_empty() => i.to_string(),
-        _ => return deny("path is not /track/<id>"),
-    };
-
-    let state = app.state::<Arc<AppState>>();
-    let track = match state.library.lock().unwrap().get(&id) {
-        Ok(Some(t)) => t,
-        Ok(None) => return deny("no track with that id"),
-        Err(e) => return deny(&format!("library lookup failed: {e}")),
-    };
-    let bytes = match std::fs::read(&track.audio_path) {
-        Ok(b) => b,
-        Err(e) => return deny(&format!("cannot read {}: {e}", track.audio_path)),
-    };
-    eprintln!("[aria://] serving {} ({} bytes)", track.audio_path, bytes.len());
-    let total = bytes.len() as u64;
-
-    // Honour a single-range request; that is all a media element issues.
-    let range = request
-        .headers()
-        .get(header::RANGE)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("bytes="))
-        .and_then(|v| {
-            let (a, b) = v.split_once('-')?;
-            let start: u64 = a.parse().ok()?;
-            let end: u64 = if b.is_empty() {
-                total.saturating_sub(1)
-            } else {
-                b.parse().ok()?
-            };
-            (start <= end && start < total).then_some((start, end.min(total - 1)))
-        });
-
-    match range {
-        Some((start, end)) => {
-            let slice = bytes[start as usize..=end as usize].to_vec();
-            Response::builder()
-                .status(StatusCode::PARTIAL_CONTENT)
-                .header(header::CONTENT_TYPE, "audio/mpeg")
-                .header(header::ACCEPT_RANGES, "bytes")
-                .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{total}"))
-                .header(header::CONTENT_LENGTH, slice.len())
-                .header(header::CACHE_CONTROL, "no-store")
-                .body(slice)
-                .unwrap()
-        }
-        None => Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, "audio/mpeg")
-            .header(header::ACCEPT_RANGES, "bytes")
-            .header(header::CONTENT_LENGTH, total)
-            .header(header::CACHE_CONTROL, "no-store")
-            .body(bytes)
-            .unwrap(),
-    }
 }
 
 /// Open the user's music folder in their file manager.

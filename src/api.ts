@@ -99,17 +99,24 @@ export const api = {
 };
 
 /**
- * A playable URL for a track, served by our own `aria://` scheme.
+ * Base URL of the local audio server, fetched once and cached.
  *
- * Windows and Android route custom schemes through an http:// host; the others
- * use the scheme directly.
+ * Audio is served over loopback HTTP rather than a custom scheme: WebKitGTK
+ * hands media URLs to GStreamer, which has no URI handler for custom schemes,
+ * so `aria://` was fetched successfully and then never decoded.
  */
+let audioBase: string | null = null;
+
+export async function loadAudioBase(): Promise<void> {
+  if (!isDesktop || audioBase) return;
+  const { invoke } = await tauri();
+  audioBase = await invoke<string>("audio_base_url");
+}
+
+/** A playable URL for a track. Empty until loadAudioBase() has run. */
 export function trackAudioUrl(id: string): string {
-  if (!isDesktop) return "";
-  const isWindowsish = navigator.userAgent.includes("Windows");
-  return isWindowsish
-    ? `http://aria.localhost/track/${encodeURIComponent(id)}`
-    : `aria://localhost/track/${encodeURIComponent(id)}`;
+  if (!isDesktop || !audioBase) return "";
+  return `${audioBase}/track/${encodeURIComponent(id)}`;
 }
 
 /** Open the music folder in the system file manager. */

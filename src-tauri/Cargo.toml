@@ -26,6 +26,10 @@ tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["json", "multipart", "stream", "blocking"] }
 
 rusqlite = { version = "0.32", features = ["bundled"] }
+# Serves audio over plain localhost HTTP. WebKitGTK hands media URLs to
+# GStreamer, which has no URI handler for custom schemes — so http:// is the
+# only thing that actually plays.
+tiny_http = "0.12"
 uuid = { version = "1", features = ["v4"] }
 dirs = "5"
 thiserror = "2"
