@@ -102,9 +102,11 @@ body.text-large { font-size: 19px; }
   display: flex;
   flex-direction: column;
   height: 100%;
-  max-width: 1000px;
+  /* Wide enough to use a large window, capped so text lines never get so long
+     they're tiring to read. */
+  max-width: 1320px;
   margin: 0 auto;
-  padding: 0 24px;
+  padding: 0 32px;
 }
 
 .masthead {
@@ -161,6 +163,20 @@ body.text-large { font-size: 19px; }
   color: var(--text-dim);
   margin: 8px 0 20px;
   max-width: 62ch;
+}
+
+/* The create form is reading-and-typing work, so it keeps a comfortable
+   measure even when the window is wide. Track cards, by contrast, use the full
+   width — they hold controls rather than prose. */
+#panel-create .field,
+#panel-create .btn-row {
+  max-width: 780px;
+}
+#panel-create .grid-2 {
+  max-width: 780px;
+}
+.hint {
+  max-width: 70ch;
 }
 
 .field { margin-bottom: 18px; }
