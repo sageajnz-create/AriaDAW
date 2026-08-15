@@ -20,9 +20,12 @@ export default function Library({
   const [playError, setPlayError] = useState<Record<string, string>>({});
 
   /** Turn a MediaError into something a person can act on — and something
-   *  specific enough to debug from, rather than "an error". */
-  function describeMediaError(el: HTMLAudioElement): string {
-    const e = el.error;
+   *  specific enough to debug from, rather than "an error".
+   *
+   *  Takes a nullable element on purpose: React clears `currentTarget` once the
+   *  event has been dispatched, so anything reading it late gets null. */
+  function describeMediaError(el: HTMLAudioElement | null): string {
+    const e = el?.error;
     if (!e) return "Playback failed for an unknown reason.";
     const map: Record<number, string> = {
       1: "Playback was aborted.",
@@ -127,12 +130,16 @@ export default function Library({
                   controls
                   preload="none"
                   src={src}
-                  onError={(e) =>
-                    setPlayError((p) => ({
-                      ...p,
-                      [t.id]: describeMediaError(e.currentTarget),
-                    }))
-                  }
+                  onError={(e) => {
+                    // Read the element NOW. Passing `e.currentTarget` into the
+                    // updater below defers the read until React runs it, by
+                    // which point React has nulled it — that threw a TypeError
+                    // during render, unmounted the whole app, and left a blank
+                    // grey window that looked for all the world like a driver
+                    // bug.
+                    const message = describeMediaError(e.currentTarget);
+                    setPlayError((p) => ({ ...p, [t.id]: message }));
+                  }}
                   onPlaying={() =>
                     setPlayError((p) => {
                       const { [t.id]: _drop, ...rest } = p;
