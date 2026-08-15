@@ -73,10 +73,13 @@ impl EnginePaths {
         }
 
         for root in &roots {
-            let bin = root.join("build/ace-server");
+            // build-static first: that's what packaging produces, and the only
+            // one that runs without ggml shared libraries sitting beside it.
+            let bin = root.join("build-static/ace-server");
+            let shared = root.join("build/ace-server");
             let alt = root.join("ace-server");
             let models = root.join("models");
-            for candidate in [bin, alt] {
+            for candidate in [bin, shared, alt] {
                 if candidate.is_file() && models.is_dir() {
                     return Ok(Self { server_bin: candidate, models_dir: models });
                 }

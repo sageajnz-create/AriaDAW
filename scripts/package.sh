@@ -15,30 +15,58 @@ TRIPLE="$(rustc -vV | awk '/^host:/ {print $2}')"
 echo "==> target: $TRIPLE"
 
 # --- engine ---------------------------------------------------------------
-if [ ! -x engine/acestep.cpp/build/ace-server ]; then
+# Built with BUILD_SHARED_LIBS=OFF on purpose. The default build links against
+# four libggml*.so files by absolute path inside the build directory, so a
+# packaged copy installs cleanly and then fails to start on any other machine.
+# A static binary is bigger (~55 MB) and simply works.
+if [ ! -x engine/acestep.cpp/build-static/ace-server ]; then
     echo "==> building the engine (this takes a few minutes)"
     if [ ! -d engine/acestep.cpp ]; then
         git clone --recurse-submodules --depth 1 \
             https://github.com/ServeurpersoCom/acestep.cpp.git engine/acestep.cpp
     fi
-    (cd engine/acestep.cpp && ./buildvulkan.sh)
+    (
+        cd engine/acestep.cpp
+        mkdir -p build-static && cd build-static
+        cmake .. -DGGML_VULKAN=ON -DBUILD_SHARED_LIBS=OFF
+        cmake --build . --config Release -j "$(nproc)"
+    )
 fi
 
 mkdir -p src-tauri/binaries
-cp engine/acestep.cpp/build/ace-server "src-tauri/binaries/ace-server-${TRIPLE}"
+cp engine/acestep.cpp/build-static/ace-server "src-tauri/binaries/ace-server-${TRIPLE}"
 echo "==> engine staged as ace-server-${TRIPLE}"
 
-# ggml builds shared libraries next to the binary; they have to travel with it.
-mkdir -p src-tauri/resources/engine
-cp engine/acestep.cpp/build/*.so* src-tauri/resources/engine/ 2>/dev/null || true
-echo "==> $(ls -1 src-tauri/resources/engine 2>/dev/null | wc -l) engine libraries staged"
+# Refuse to ship a binary that needs libraries we aren't shipping.
+if ldd "src-tauri/binaries/ace-server-${TRIPLE}" 2>/dev/null | grep -qiE 'ggml|not found'; then
+    echo "!! the engine still depends on ggml shared libraries, so it would not"
+    echo "   start once installed. Remove engine/acestep.cpp/build-static and"
+    echo "   let this script rebuild it."
+    exit 1
+fi
+echo "==> engine is self-contained"
 
 # --- app ------------------------------------------------------------------
 echo "==> installing frontend dependencies"
 npm ci --silent 2>/dev/null || npm install --silent
 
-echo "==> building"
-npm run tauri build
+# The AppImage tooling is itself an AppImage and needs libfuse.so.2, which
+# current distros no longer ship — they have fuse3. Rather than make people
+# install a legacy fuse2 package, tell those tools to extract and run.
+export APPIMAGE_EXTRACT_AND_RUN=1
+# linuxdeploy's strip step fails on the 55 MB static engine binary and takes
+# the whole AppImage down with it. Skipping strip costs a few MB.
+export NO_STRIP=1
+
+# Build the .deb first and separately. A failure in the AppImage stage aborts
+# the whole run, and there is no reason to lose a working .deb to it.
+echo "==> building .deb"
+npm run tauri build -- --bundles deb
+
+echo "==> building AppImage"
+npm run tauri build -- --bundles appimage || {
+    echo "!! AppImage failed; the .deb above is still good"
+}
 
 echo
 echo "==> done"
