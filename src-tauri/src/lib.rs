@@ -766,8 +766,12 @@ fn attempt_generation(
     let user_wrote_lyrics = !opts.instrumental && !opts.lyrics.trim().is_empty();
     let mut lyrics = if opts.instrumental {
         "[Instrumental]".to_string()
+    } else if user_wrote_lyrics {
+        // Someone who writes lyrics without markers still deserves a song with
+        // sections. Their words are never changed — only headings are added.
+        lyrics::ensure_structure(opts.lyrics.trim())
     } else {
-        opts.lyrics.trim().to_string()
+        String::new()
     };
     let mut lyricist: Option<String> = None;
     let mut expanded_style: Option<String> = None;
@@ -790,7 +794,9 @@ fn attempt_generation(
             match writer.write(&opts.prompt, &language_name(&language), opts.duration) {
                 Ok(text) => {
                     lyricist = Some(writer.model_name().to_string());
-                    lyrics = text;
+                    // Markers are what tell the music where to change, so a
+                    // lyric without them gets one rather than being used as-is.
+                    lyrics = lyrics::ensure_structure(&text);
                 }
                 // Not fatal: fall through and let ACE-Step write them instead.
                 Err(e) => eprintln!("lyric model failed, falling back: {e}"),
@@ -848,7 +854,7 @@ fn attempt_generation(
             emit_stage(app, job_id, "writing", "Trying different words");
         }
         if !best.trim().is_empty() {
-            lyrics = best;
+            lyrics = lyrics::ensure_structure(&best);
         }
     }
 

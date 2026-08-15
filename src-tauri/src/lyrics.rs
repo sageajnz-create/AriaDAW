@@ -227,7 +227,102 @@ pub fn score_lyrics(lyrics: &str) -> f64 {
     // Below about six sung lines there isn't a song there, however varied.
     let enough = (lines.len() as f64 / 6.0).min(1.0);
 
-    distinct * (1.0 - noise) * enough
+    // Structure is scored rather than required, because it can be repaired.
+    // A lyric with a verse and a chorus tells the music where to change; one
+    // without gives it nothing to build on.
+    let shape = if has_structure(lyrics) { 1.0 } else { 0.8 };
+
+    distinct * (1.0 - noise) * enough * shape
+}
+
+/// Section markers present in a lyric, lower-cased and stripped of numbering
+/// and trailing notes, so `[Verse 2 - quieter]` reads as `verse`.
+fn section_markers(lyrics: &str) -> Vec<String> {
+    lyrics
+        .lines()
+        .map(str::trim)
+        .filter_map(|l| l.strip_prefix('[')?.split(']').next())
+        .map(|m| {
+            let head = m.split(" - ").next().unwrap_or(m);
+            head.trim_end_matches(|c: char| c.is_ascii_digit() || c.is_whitespace())
+                .to_ascii_lowercase()
+        })
+        .filter(|m| !m.is_empty())
+        .collect()
+}
+
+/// Does the lyric actually describe a song's shape?
+///
+/// The markers are not decoration — they are what tells the music where to
+/// change. Without them a track has nothing to build around and comes out as a
+/// wash. Measured on the no-Ollama path, three of six generations had no verse,
+/// no chorus and no sung lines at all.
+pub fn has_structure(lyrics: &str) -> bool {
+    let markers = section_markers(lyrics);
+    let has_verse = markers.iter().any(|m| m.contains("verse"));
+    let has_chorus = markers
+        .iter()
+        .any(|m| m.contains("chorus") || m.contains("refrain") || m.contains("hook"));
+    has_verse && has_chorus
+}
+
+/// Give unmarked lyrics a sensible shape rather than throwing them away.
+///
+/// A model sometimes writes perfectly good lines with no markers at all. That
+/// is worth repairing rather than discarding: group the lines into stanzas and
+/// label them verse/chorus/verse, which is the shape most songs take anyway.
+/// Lyrics that already have structure are returned untouched.
+pub fn ensure_structure(lyrics: &str) -> String {
+    if has_structure(lyrics) {
+        return lyrics.to_string();
+    }
+
+    // Keep only real sung lines; any stray markers are unreliable if we got here.
+    let lines: Vec<&str> = lyrics
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('['))
+        .collect();
+
+    if lines.len() < 4 {
+        // Too little to shape. Leave it alone; the caller scores it anyway.
+        return lyrics.to_string();
+    }
+
+    // Four-line stanzas, alternating verse and chorus, which is the most common
+    // shape and gives the model a clear repeat to latch onto.
+    let mut out = String::from("[Intro]\n\n");
+    let mut verse_no = 1;
+    let mut chorus_written = false;
+    for (i, chunk) in lines.chunks(4).enumerate() {
+        let heading = if i % 2 == 1 {
+            chorus_written = true;
+            "[Chorus]".to_string()
+        } else {
+            let h = format!("[Verse {verse_no}]");
+            verse_no += 1;
+            h
+        };
+        out.push_str(&heading);
+        out.push('\n');
+        for l in chunk {
+            out.push_str(l);
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+    // A song needs a chorus; if the line count never reached a second stanza,
+    // repeat the opening lines as one.
+    if !chorus_written {
+        out.push_str("[Chorus]\n");
+        for l in lines.iter().take(2) {
+            out.push_str(l);
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+    out.push_str("[Outro]\n");
+    out
 }
 
 /// A line that is vocalising rather than saying anything: "oh oh oh", "la la la".
@@ -323,6 +418,49 @@ mod tests {
         // "Yeah" alone is filler; used in a sentence it isn't.
         assert!(is_filler("yeah yeah"));
         assert!(!is_filler("yeah I remember"));
+    }
+
+    #[test]
+    fn recognises_song_shape() {
+        use super::has_structure;
+        let shaped = "[Intro]\n[Verse 1]\nline one\n[Chorus]\nline two";
+        assert!(has_structure(shaped));
+        // Numbering and trailing notes shouldn't hide the marker.
+        assert!(has_structure("[Verse 2 - quieter]\na\n[Refrain]\nb"));
+        // Markers alone aren't shape if the essentials are missing.
+        assert!(!has_structure("[Intro]\nsome words\n[Outro]\nmore words"));
+        assert!(!has_structure("just some lines\nwith no markers at all"));
+    }
+
+    #[test]
+    fn repairs_unmarked_lyrics_instead_of_discarding_them() {
+        use super::{ensure_structure, has_structure};
+        let raw = "Morning light across the floor\nCoffee going cold again\n\
+                   I keep your letter in the drawer\nAnd read it now and then\n\
+                   We said we'd never let it go\nBut here we are once more\n\
+                   The winter came and took the snow\nAnd left it at the door";
+        let fixed = ensure_structure(raw);
+        assert!(has_structure(&fixed), "repair must produce verse and chorus");
+        // Every original line survives.
+        for line in raw.lines() {
+            assert!(fixed.contains(line.trim()), "lost a line: {line}");
+        }
+    }
+
+    #[test]
+    fn leaves_well_formed_lyrics_exactly_as_they_are() {
+        use super::ensure_structure;
+        let good = "[Verse 1]\nthe sun is shining\n[Chorus]\nhold the line";
+        assert_eq!(ensure_structure(good), good);
+    }
+
+    #[test]
+    fn does_not_invent_a_song_from_a_scrap() {
+        use super::ensure_structure;
+        // Two lines isn't enough to shape; better to leave it and let the
+        // score reject it than to pad it into something that isn't there.
+        let scrap = "one line\ntwo lines";
+        assert_eq!(ensure_structure(scrap), scrap);
     }
 
     #[test]
