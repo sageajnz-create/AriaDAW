@@ -239,12 +239,7 @@ export default function App() {
 
           {tab === "create" ? (
             <div role="tabpanel" id="panel-create" aria-labelledby="tab-create">
-              <Create
-                onCreated={onCreated}
-                engineReady={!!ready}
-                tracks={tracks}
-                hasXl={!!status?.has_xl}
-              />
+              <Create onCreated={onCreated} engineReady={!!ready} tracks={tracks} />
             </div>
           ) : (
             <div role="tabpanel" id="panel-library" aria-labelledby="tab-library">

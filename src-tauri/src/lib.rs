@@ -38,7 +38,6 @@ pub struct EngineStatus {
     models: AvailableModels,
     models_complete: bool,
     supports_stems: bool,
-    has_xl: bool,
     vae_chunk: u32,
     cpu_fallback: bool,
 }
@@ -183,7 +182,6 @@ async fn engine_status(state: State<'_, Arc<AppState>>) -> Result<EngineStatus, 
             state: eng.state(),
             models_complete: models.is_complete(),
             supports_stems: models.supports_stems(),
-            has_xl: models.xl().is_some(),
             models,
             vae_chunk: eng.settings.vae_chunk,
             cpu_fallback: eng.settings.cpu_fallback,
@@ -473,9 +471,7 @@ fn remake_like(
         vocal_language: track.vocal_language.clone(),
         // Fresh seed: the whole point is a different song.
         seed: None,
-        quality: Some(if track.model.contains("-xl-") {
-            "studio".into()
-        } else if track.model.contains("turbo") {
+        quality: Some(if track.model.contains("turbo") {
             "fast".into()
         } else {
             "best".into()
@@ -938,10 +934,7 @@ fn attempt_generation(
     }
     .ok_or_else(|| anyhow::anyhow!("no language model installed"))?;
 
-    let (dit_model, steps, shift) = match (opts.quality.as_deref(), models.xl()) {
-        // Studio: the 4B model. Four times slower for better transients.
-        (Some("studio"), Some(xl)) => (xl, 50, 1.0),
-        _ => match (best_quality, models.dit_sft.iter().find(|n| !n.contains("-xl-"))) {
+    let (dit_model, steps, shift) = match (best_quality, models.dit_sft.first()) {
         (true, Some(sft)) => (sft.clone(), 50, 1.0),
         _ => (
             models
@@ -952,7 +945,7 @@ fn attempt_generation(
             8,
             3.0,
         ),
-    }};
+    };
 
     // --- stage 1: musical metadata and audio codes --------------------------
     emit_stage(app, job_id, "composing", "Composing the music");

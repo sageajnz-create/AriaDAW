@@ -19,10 +19,9 @@ interface Props {
   engineReady: boolean;
   /** Existing tracks, offered as voice references. */
   tracks: Track[];
-  hasXl: boolean;
 }
 
-export default function Create({ onCreated, engineReady, tracks, hasXl }: Props) {
+export default function Create({ onCreated, engineReady, tracks }: Props) {
   const [prompt, setPrompt] = useState("");
   const [instrumental, setInstrumental] = useState(false);
   const [duration, setDuration] = useState(60);
@@ -256,7 +255,6 @@ export default function Create({ onCreated, engineReady, tracks, hasXl }: Props)
                 .filter((t) => !t.missing)
                 .slice(0, 40)
                 .map((t) => ({ id: t.id, title: t.title }))}
-              hasXl={hasXl}
             />
           </div>
         )}

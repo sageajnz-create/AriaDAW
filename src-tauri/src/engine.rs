@@ -165,15 +165,6 @@ impl AvailableModels {
         !self.dit_sft.is_empty()
     }
 
-    /// The 4B diffusion model, if it was downloaded.
-    ///
-    /// Measured against the 2B on the same codes: better transient punch
-    /// (crest 7.76 vs 7.35), slightly lower loudness range, and four times the
-    /// render time. Peak VRAM 4815 MB, so it fits an 8 GB card. Offered rather
-    /// than defaulted — that time cost should be someone's choice.
-    pub fn xl(&self) -> Option<String> {
-        self.dit_sft.iter().find(|n| n.contains("-xl-")).cloned()
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
