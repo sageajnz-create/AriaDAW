@@ -81,18 +81,26 @@ export const api = {
   },
 };
 
-/** Local file path -> a URL the webview may play. */
-export async function audioUrl(path: string): Promise<string> {
-  if (!isDesktop || !path) return "";
-  const { convertFileSrc } = await tauri();
-  return convertFileSrc(path);
+/**
+ * A playable URL for a track.
+ *
+ * Reads the bytes over IPC and wraps them in a blob URL instead of using the
+ * asset protocol, which has to satisfy a scope pattern, a custom protocol and
+ * the CSP — and fails as an unexplained "error trying to play" if any link in
+ * that chain is off. Blob URLs seek fine and a song is about a megabyte.
+ */
+export async function trackAudioUrl(id: string): Promise<string> {
+  if (!isDesktop) return "";
+  const { invoke } = await tauri();
+  const data = await invoke<ArrayBuffer>("read_track_audio", { id });
+  return URL.createObjectURL(new Blob([data], { type: "audio/mpeg" }));
 }
 
-/** Open a folder in the system file manager. No-op outside the desktop app. */
-export async function openFolder(path: string): Promise<void> {
+/** Open the music folder in the system file manager. */
+export async function openFolder(): Promise<void> {
   if (!isDesktop) return;
-  const { openPath } = await import("@tauri-apps/plugin-opener");
-  await openPath(path);
+  const { invoke } = await tauri();
+  await invoke<void>("open_library_folder");
 }
 
 /** Subscribe to a backend event. Returns an unsubscribe function. */

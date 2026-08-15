@@ -173,7 +173,13 @@ export default function App() {
           <button
             type="button"
             className="btn btn-icon"
-            onClick={async () => openFolder(await api.libraryFolder())}
+            onClick={async () => {
+              try {
+                await openFolder();
+              } catch (e) {
+                setBootError(`Could not open your music folder: ${e}`);
+              }
+            }}
           >
             Open my music folder
           </button>

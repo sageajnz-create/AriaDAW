@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, audioUrl, formatDate, formatDuration } from "../api";
+import { api, formatDate, formatDuration, trackAudioUrl } from "../api";
 import { isDesktop } from "../preview";
 import type { Track } from "../types";
 
@@ -13,18 +13,32 @@ export default function Library({ tracks, onChanged }: Props) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [urls, setUrls] = useState<Record<string, string>>({});
 
-  // File paths have to be converted to playable URLs by the desktop shell.
+  // Load audio as blob URLs, and revoke them on unmount so we don't leak.
   useEffect(() => {
     let cancelled = false;
+    const created: string[] = [];
     (async () => {
       const next: Record<string, string> = {};
       for (const t of tracks) {
-        next[t.id] = await audioUrl(t.audio_path);
+        try {
+          const u = await trackAudioUrl(t.id);
+          if (u) {
+            next[t.id] = u;
+            created.push(u);
+          }
+        } catch (e) {
+          console.error("could not load audio for", t.id, e);
+        }
       }
-      if (!cancelled) setUrls(next);
+      if (cancelled) {
+        created.forEach((u) => URL.revokeObjectURL(u));
+      } else {
+        setUrls(next);
+      }
     })();
     return () => {
       cancelled = true;
+      created.forEach((u) => URL.revokeObjectURL(u));
     };
   }, [tracks]);
 

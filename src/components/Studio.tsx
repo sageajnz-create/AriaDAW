@@ -149,11 +149,13 @@ export default function Studio({ values, onChange, disabled, lyricsRef }: Props)
             onChange={(e) => onChange({ embellish: e.target.checked })}
             disabled={disabled}
           />
-          <span>Let Aria rewrite my description into a richer one</span>
+          <span>Let Aria flesh out my description (recommended)</span>
         </label>
         <p className="hint">
-          Adds musical detail on its own, but it also re-decides the language and
-          may ignore what you asked for. Off keeps your words exactly as written.
+          Aria adds its own musical detail, which is what makes songs sound full
+          and produces proper sung lyrics. Turning this off keeps your words
+          exactly as written, but songs come out thinner and often have no
+          singing at all.
         </p>
       </div>
     </div>

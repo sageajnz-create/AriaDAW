@@ -48,13 +48,19 @@ pub struct GenerateOptions {
     pub instrumental: bool,
     /// Let the model expand the description into a richer caption of its own.
     ///
-    /// Off by default, and that default is load-bearing. With expansion on, the
-    /// model's chain-of-thought also re-decides the *language* and ignores the
-    /// `vocal_language` field entirely — measured directly: an English request
-    /// produced Norwegian, then Indonesian, then no lyrics at all. With it off,
-    /// language was correct 3/3 in English plus Spanish and Japanese, the user's
-    /// wording survives verbatim, and it runs a second faster.
-    #[serde(default)]
+    /// **On by default.** Turning it off fixes language selection but costs far
+    /// more than it buys, measured on real output:
+    ///
+    /// | | expansion on | expansion off |
+    /// |---|---|---|
+    /// | caption the DiT sees | rich, 160+ chars of musical detail | the user's bare prompt |
+    /// | lyrics | real words, 525-655 chars | skeletal stubs, e.g. `[Verse 1] [Male vocal ad-lib: Woo!]` |
+    /// | vocals | yes | often none at all |
+    ///
+    /// A song with no singing and thin production is a worse failure than a song
+    /// in an unexpected language, so expansion stays on and language is nudged
+    /// through the caption instead.
+    #[serde(default = "default_true")]
     pub embellish: bool,
     #[serde(default)]
     pub bpm: Option<i64>,
@@ -70,6 +76,10 @@ pub struct GenerateOptions {
 
 fn default_duration() -> f64 {
     60.0
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn now_secs() -> i64 {
@@ -305,10 +315,29 @@ fn attempt_generation(
 
     let lyrics = if opts.instrumental { "[Instrumental]".to_string() } else { opts.lyrics.clone() };
 
+    // Nudge the language through the caption. The `vocal_language` field is
+    // echoed back but does not steer lyric writing — the library recorded "en"
+    // on a song whose lyrics were Norwegian. Naming it in the caption is not
+    // perfectly reliable either, but it's the only lever that works at all
+    // without disabling expansion (which costs the vocals themselves).
+    let language = opts
+        .vocal_language
+        .clone()
+        .filter(|l| !l.trim().is_empty())
+        .unwrap_or_else(default_vocal_language);
+    let caption = if opts.instrumental {
+        opts.prompt.clone()
+    } else {
+        format!("{}. Sung in {}, with {} lyrics.",
+            opts.prompt.trim_end_matches(['.', ' ']),
+            language_name(&language),
+            language_name(&language))
+    };
+
     let mut req = json!({
         "lm_model": lm_model,
         "synth_model": dit_model,
-        "caption": opts.prompt,
+        "caption": caption,
         "lyrics": lyrics,
         "duration": opts.duration,
         "inference_steps": 8,
@@ -327,12 +356,7 @@ fn attempt_generation(
     if let Some(t) = opts.timesignature.as_ref().filter(|t| !t.trim().is_empty()) {
         req["timesignature"] = json!(t);
     }
-    // Always send a language. Omitting it lets the model choose one at random.
-    req["vocal_language"] = json!(opts
-        .vocal_language
-        .clone()
-        .filter(|l| !l.trim().is_empty())
-        .unwrap_or_else(default_vocal_language));
+    req["vocal_language"] = json!(language);
     // -1 means "pick one for me"; the engine echoes back the seed it used, so a
     // track can always be reproduced from its library entry.
     if let Some(s) = opts.seed.filter(|s| *s >= 0) {
@@ -466,6 +490,8 @@ pub fn run() {
             languages,
             default_language,
             audio_output_available,
+            read_track_audio,
+            open_library_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Aria");
@@ -495,6 +521,64 @@ fn languages() -> Vec<(String, String)> {
 #[tauri::command]
 fn default_language() -> String {
     default_vocal_language()
+}
+
+/// Human-readable name for a language code, for use inside a caption. The model
+/// responds to "Sung in Japanese" far better than to a bare "ja".
+fn language_name(code: &str) -> String {
+    languages()
+        .into_iter()
+        .find(|(c, _)| c == code)
+        .map(|(_, n)| n)
+        .unwrap_or_else(|| "English".to_string())
+}
+
+/// Read a track's audio as raw bytes.
+///
+/// The webview plays these from a blob URL rather than Tauri's asset protocol.
+/// The asset path has to clear a scope pattern, the custom protocol, and the
+/// CSP, and a failure anywhere in that chain surfaces as an unexplained "error
+/// trying to play". Handing over bytes we already have on disk removes the whole
+/// class of problem; a song is around a megabyte, so the cost is nothing.
+#[tauri::command]
+fn read_track_audio(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<tauri::ipc::Response, String> {
+    let track = state
+        .library
+        .lock()
+        .unwrap()
+        .get(&id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "no such track".to_string())?;
+    let bytes = std::fs::read(&track.audio_path)
+        .map_err(|e| format!("could not read {}: {e}", track.audio_path))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Open the user's music folder in their file manager.
+///
+/// Done here rather than through the opener plugin: the plugin call was silently
+/// denied, and shelling out to the platform handler is both simpler and easier
+/// to report failures from.
+#[tauri::command]
+fn open_library_folder(state: State<'_, Arc<AppState>>) -> Result<(), String> {
+    let dir = state.library.lock().unwrap().audio_dir.clone();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    #[cfg(target_os = "linux")]
+    let program = "xdg-open";
+    #[cfg(target_os = "macos")]
+    let program = "open";
+    #[cfg(target_os = "windows")]
+    let program = "explorer";
+
+    std::process::Command::new(program)
+        .arg(&dir)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("could not open {}: {e}", dir.display()))
 }
 
 /// Can the webview actually produce sound?
