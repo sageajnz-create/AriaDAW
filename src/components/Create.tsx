@@ -143,7 +143,7 @@ export default function Create({ onCreated, engineReady }: Props) {
               onChange={(e) => setInstrumental(e.target.checked)}
               disabled={busy}
             />
-            Instrumental — no singing
+            <span>Instrumental — no singing</span>
           </label>
         </div>
 

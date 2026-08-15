@@ -223,14 +223,67 @@ textarea:hover, input:hover, select:hover { border-color: var(--accent); }
 }
 
 /* --- toggle (checkbox) -------------------------------------------------- */
+/* Selector must out-specify `.field label` above (0,1,1), or the label keeps
+   `display:block` and the flex gap silently does nothing. */
+.field label.check,
 .check {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   cursor: pointer;
   font-weight: 500;
+  /* Generous hit area — easier for imprecise pointing, and a bigger target
+     is one of the cheapest accessibility wins there is. */
+  padding: 6px 0;
 }
-.check input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+.check input {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  margin: 0;
+}
+
+/* --- range slider ------------------------------------------------------- */
+input[type="range"] {
+  width: 100%;
+  max-width: 460px;
+  height: 34px;
+  background: transparent;
+  appearance: none;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+}
+input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 24px;
+  height: 24px;
+  margin-top: -9px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+}
+input[type="range"]::-moz-range-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+}
+input[type="range"]:hover::-webkit-slider-thumb { background: var(--accent-hot); }
+input[type="range"]:hover::-moz-range-thumb { background: var(--accent-hot); }
 
 /* --- progress ----------------------------------------------------------- */
 .progress {
