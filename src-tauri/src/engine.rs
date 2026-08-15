@@ -225,6 +225,11 @@ impl Engine {
             .arg(self.settings.vae_chunk.to_string())
             .arg("--vae-overlap")
             .arg(overlap.to_string())
+            // Upstream caps the language model batch at 1, which silently
+            // reduces a request for several takes to one — verified: the same
+            // request returned 1 take at the default and 2 once raised.
+            .arg("--max-batch")
+            .arg("4")
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 

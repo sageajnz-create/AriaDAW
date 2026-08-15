@@ -20,6 +20,8 @@ export interface StudioValues {
   seed: string;
   embellish: boolean;
   quality: "best" | "fast";
+  variations: number;
+  format: "mp3" | "wav24";
 }
 
 interface Props {
@@ -141,6 +143,43 @@ export default function Studio({ values, onChange, disabled, lyricsRef }: Props)
         </p>
       </div>
 
+      <div className="grid-2">
+        <div className="field">
+          <label htmlFor="variations">
+            How many versions? {values.variations === 1 ? "Just one" : values.variations}
+          </label>
+          <input
+            id="variations"
+            type="range"
+            min={1}
+            max={4}
+            step={1}
+            value={values.variations}
+            onChange={(e) => onChange({ variations: Number(e.target.value) })}
+            disabled={disabled}
+            aria-valuetext={`${values.variations} version${values.variations > 1 ? "s" : ""}`}
+          />
+          <p className="hint">
+            Same words, different performances, so you can pick a favourite. Each
+            one adds to the wait.
+          </p>
+        </div>
+
+        <div className="field">
+          <label htmlFor="format">Save as</label>
+          <select
+            id="format"
+            value={values.format}
+            onChange={(e) => onChange({ format: e.target.value as "mp3" | "wav24" })}
+            disabled={disabled}
+          >
+            <option value="mp3">MP3 — 320 kbps, small files</option>
+            <option value="wav24">WAV — lossless, about 10x bigger</option>
+          </select>
+          <p className="hint">Choose WAV if you're taking this into a music app.</p>
+        </div>
+      </div>
+
       <div className="field">
         <label htmlFor="quality">Sound quality</label>
         <select
@@ -191,5 +230,7 @@ export function studioToOptions(v: StudioValues): Partial<GenerateOptions> {
     seed: v.seed ? Number(v.seed) : null,
     embellish: v.embellish,
     quality: v.quality,
+    variations: v.variations,
+    format: v.format,
   };
 }

@@ -72,9 +72,21 @@ fn header_value(request: &tiny_http::Request, name: &'static str) -> Option<Stri
 }
 
 enum Reply {
-    Full { path: PathBuf, len: u64 },
-    Partial { path: PathBuf, start: u64, end: u64, total: u64 },
+    Full { path: PathBuf, len: u64, mime: &'static str },
+    Partial { path: PathBuf, start: u64, end: u64, total: u64, mime: &'static str },
     Denied(u16, String),
+}
+
+/// Tracks can be saved lossless, so the type has to follow the file rather than
+/// always claiming mp3 — a wav served as audio/mpeg won't play.
+fn mime_for(path: &std::path::Path) -> &'static str {
+    match path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
+        "wav" => "audio/wav",
+        "flac" => "audio/flac",
+        "ogg" | "opus" => "audio/ogg",
+        "m4a" | "aac" => "audio/mp4",
+        _ => "audio/mpeg",
+    }
 }
 
 fn handle(
@@ -106,9 +118,10 @@ fn handle(
         Err(e) => return Reply::Denied(404, format!("cannot read file: {e}")),
     };
 
+    let mime = mime_for(&path);
     match range.and_then(|r| parse_range(r, total)) {
-        Some((start, end)) => Reply::Partial { path, start, end, total },
-        None => Reply::Full { path, len: total },
+        Some((start, end)) => Reply::Partial { path, start, end, total, mime },
+        None => Reply::Full { path, len: total, mime },
     }
 }
 
@@ -130,16 +143,18 @@ fn parse_range(raw: &str, total: u64) -> Option<(u64, u64)> {
 }
 
 fn respond(request: tiny_http::Request, reply: Reply) -> std::io::Result<()> {
-    let audio = Header::from_bytes(&b"Content-Type"[..], &b"audio/mpeg"[..]).unwrap();
     let ranges = Header::from_bytes(&b"Accept-Ranges"[..], &b"bytes"[..]).unwrap();
+    let ctype = |m: &str| Header::from_bytes(&b"Content-Type"[..], m.as_bytes()).unwrap();
 
     match reply {
-        Reply::Full { path, len } => {
+        Reply::Full { path, len, mime } => {
+            let audio = ctype(mime);
             let file = std::fs::File::open(&path)?;
             let resp = Response::new(StatusCode(200), vec![audio, ranges], file, Some(len as usize), None);
             request.respond(resp)
         }
-        Reply::Partial { path, start, end, total } => {
+        Reply::Partial { path, start, end, total, mime } => {
+            let audio = ctype(mime);
             let mut file = std::fs::File::open(&path)?;
             file.seek(SeekFrom::Start(start))?;
             let len = end - start + 1;

@@ -170,17 +170,21 @@ impl AceClient {
         }
     }
 
-    /// The enriched request produced by `/lm`: lyrics, bpm, key, audio codes.
-    pub fn lm_result(&self, id: &str) -> Result<Value> {
+    /// The enriched requests produced by `/lm`: lyrics, bpm, key, audio codes.
+    ///
+    /// One entry per variation. With `lm_batch_size > 1` the engine returns
+    /// several takes of the same prompt, each with its own codes — different
+    /// performances rather than different songs.
+    pub fn lm_results(&self, id: &str) -> Result<Vec<Value>> {
         let v: Value = self
             .http
             .get(format!("{}/job?id={id}&result=1", self.base))
             .send()?
             .json()?;
-        // Batch jobs return an array; we submit one at a time.
         Ok(match v {
-            Value::Array(mut items) if !items.is_empty() => items.remove(0),
-            other => other,
+            Value::Array(items) if !items.is_empty() => items,
+            Value::Array(_) => return Err(anyhow!("the engine returned no results")),
+            other => vec![other],
         })
     }
 

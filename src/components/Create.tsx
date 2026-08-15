@@ -40,6 +40,8 @@ export default function Create({ onCreated, engineReady }: Props) {
     // vocals at all. See GenerateOptions::embellish in the Rust side.
     embellish: true,
     quality: "best",
+    variations: 1,
+    format: "mp3",
   });
   const jobRef = useRef<string | null>(null);
   const lyricsRef = useRef<HTMLTextAreaElement>(null);
@@ -75,12 +77,18 @@ export default function Create({ onCreated, engineReady }: Props) {
     );
 
     offs.push(
+      onEvent<{ job_id: string; track: Track }>("gen:track", (p) => {
+        if (jobRef.current && p.job_id !== jobRef.current) return;
+        onCreated(p.track);
+      }),
+    );
+
+    offs.push(
       onEvent<{ job_id: string; track: Track }>("gen:done", (p) => {
         if (jobRef.current && p.job_id !== jobRef.current) return;
         setBusy(false);
         setStage(null);
         jobRef.current = null;
-        onCreated(p.track);
       }),
     );
 

@@ -84,6 +84,14 @@ pub struct GenerateOptions {
     /// more; lower is plainer but coherent.
     #[serde(default)]
     pub lyric_variety: Option<f64>,
+    /// How many takes to make from one prompt. Same words, different
+    /// performances — Suno gives two and calls it a feature; there is no reason
+    /// to ration it here beyond the time it costs.
+    #[serde(default)]
+    pub variations: Option<u8>,
+    /// "mp3" (320 kbps) or "wav24" / "wav16" / "wav32" for lossless.
+    #[serde(default)]
+    pub format: Option<String>,
 }
 
 fn default_duration() -> f64 {
@@ -584,13 +592,16 @@ fn run_generation(
         let ace = AceClient::new(&base)?;
 
         match attempt_generation(app, st, job_id, &opts, &ace) {
-            Ok(track) => {
+            Ok(tracks) => {
                 {
                     let mut eng = st.engine.lock().unwrap();
                     eng.mark_chunk_verified();
                     save_settings(&st.settings_path, &eng.settings);
                 }
-                let _ = app.emit("gen:done", json!({ "job_id": job_id, "track": track }));
+                let _ = app.emit(
+                    "gen:done",
+                    json!({ "job_id": job_id, "track": tracks.last(), "tracks": tracks }),
+                );
                 return Ok(());
             }
             Err(e) => {
@@ -640,7 +651,7 @@ fn attempt_generation(
     job_id: &str,
     opts: &GenerateOptions,
     ace: &AceClient,
-) -> anyhow::Result<Track> {
+) -> anyhow::Result<Vec<Track>> {
     let models = st.engine.lock().unwrap().paths.available_models()?;
 
     // Quality picks a *pair* of models, because both halves matter and both
@@ -781,52 +792,88 @@ fn attempt_generation(
         req["seed"] = json!(s);
     }
 
+    // Several takes of the same prompt: same words, different performances.
+    let takes = opts.variations.unwrap_or(1).clamp(1, 4);
+    if takes > 1 {
+        req["lm_batch_size"] = json!(takes);
+    }
+
+    // mp3 at 320 is near-transparent and about a tenth the size; wav is there
+    // for anyone taking a track into a DAW.
+    let format = opts.format.clone().unwrap_or_else(|| "mp3".into());
+    req["output_format"] = json!(format);
+    let ext = if format.starts_with("wav") { "wav" } else { "mp3" };
+
     let lm_id = ace.submit_lm(&req)?;
     wait_for(ace, &lm_id, app, job_id, "writing", "Writing the song")?;
-    let enriched: Value = ace.lm_result(&lm_id)?;
+    let enriched_all = ace.lm_results(&lm_id)?;
 
-    // --- stage 2: render audio ---------------------------------------------
-    emit_stage(app, job_id, "rendering", "Recording the audio");
-    let synth_id = ace.submit_synth(&enriched)?;
-    wait_for(ace, &synth_id, app, job_id, "rendering", "Recording the audio")?;
-    let out = ace.synth_result(&synth_id)?;
+    // --- stage 2: render each take -----------------------------------------
+    let mut saved: Vec<Track> = Vec::new();
+    let total = enriched_all.len();
+    for (index, mut enriched) in enriched_all.into_iter().enumerate() {
+        let detail = if total > 1 {
+            format!("Recording take {} of {}", index + 1, total)
+        } else {
+            "Recording the audio".to_string()
+        };
+        emit_stage(app, job_id, "rendering", &detail);
 
-    // --- save ---------------------------------------------------------------
+        enriched["output_format"] = json!(format);
+        enriched["mp3_bitrate"] = json!(320);
+
+        let synth_id = ace.submit_synth(&enriched)?;
+        wait_for(ace, &synth_id, app, job_id, "rendering", &detail)?;
+        let out = ace.synth_result(&synth_id)?;
+
+        let id = uuid::Uuid::new_v4().to_string();
+        let lib = st.library.lock().unwrap();
+        let audio_path = lib.audio_dir.join(format!("{id}.{ext}"));
+        std::fs::write(&audio_path, &out.audio)?;
+
+        let latent_path = out.latent.as_ref().and_then(|l| {
+            let p = lib.audio_dir.join(format!("{id}.latent"));
+            std::fs::write(&p, l).ok().map(|_| p.display().to_string())
+        });
+
+        let base_title = title_from(&opts.prompt);
+        let track = Track {
+            id,
+            title: if total > 1 {
+                format!("{base_title} (take {})", index + 1)
+            } else {
+                base_title
+            },
+            prompt: opts.prompt.clone(),
+            caption: enriched.get("caption").and_then(Value::as_str).unwrap_or_default().to_string(),
+            lyrics: enriched.get("lyrics").and_then(Value::as_str).unwrap_or_default().to_string(),
+            bpm: enriched.get("bpm").and_then(Value::as_i64),
+            keyscale: enriched.get("keyscale").and_then(Value::as_str).map(String::from),
+            timesignature: enriched.get("timesignature").and_then(Value::as_str).map(String::from),
+            vocal_language: enriched.get("vocal_language").and_then(Value::as_str).map(String::from),
+            duration: enriched.get("duration").and_then(Value::as_f64).unwrap_or(opts.duration),
+            seed: enriched.get("seed").and_then(Value::as_i64),
+            model: dit_model.clone(),
+            audio_path: audio_path.display().to_string(),
+            latent_path,
+            created_at: now_secs(),
+            parent_id: None,
+            operation: None,
+            favorite: false,
+            lyricist: lyricist.clone(),
+            missing: false,
+        };
+        lib.insert(&track)?;
+        drop(lib);
+
+        // Publish each take as it lands, so the first is playable while the
+        // rest are still rendering.
+        let _ = app.emit("gen:track", json!({ "job_id": job_id, "track": track }));
+        saved.push(track);
+    }
+
     emit_stage(app, job_id, "saving", "Saving to your library");
-    let id = uuid::Uuid::new_v4().to_string();
-    let lib = st.library.lock().unwrap();
-    let audio_path = lib.audio_dir.join(format!("{id}.mp3"));
-    std::fs::write(&audio_path, &out.audio)?;
-
-    let latent_path = out.latent.as_ref().and_then(|l| {
-        let p = lib.audio_dir.join(format!("{id}.latent"));
-        std::fs::write(&p, l).ok().map(|_| p.display().to_string())
-    });
-
-    let track = Track {
-        id: id.clone(),
-        title: title_from(&opts.prompt),
-        prompt: opts.prompt.clone(),
-        caption: enriched.get("caption").and_then(Value::as_str).unwrap_or_default().to_string(),
-        lyrics: enriched.get("lyrics").and_then(Value::as_str).unwrap_or_default().to_string(),
-        bpm: enriched.get("bpm").and_then(Value::as_i64),
-        keyscale: enriched.get("keyscale").and_then(Value::as_str).map(String::from),
-        timesignature: enriched.get("timesignature").and_then(Value::as_str).map(String::from),
-        vocal_language: enriched.get("vocal_language").and_then(Value::as_str).map(String::from),
-        duration: enriched.get("duration").and_then(Value::as_f64).unwrap_or(opts.duration),
-        seed: enriched.get("seed").and_then(Value::as_i64),
-        model: dit_model,
-        audio_path: audio_path.display().to_string(),
-        latent_path,
-        created_at: now_secs(),
-        parent_id: None,
-        operation: None,
-        favorite: false,
-        lyricist: lyricist.clone(),
-        missing: false,
-    };
-    lib.insert(&track)?;
-    Ok(track)
+    Ok(saved)
 }
 
 fn wait_for(

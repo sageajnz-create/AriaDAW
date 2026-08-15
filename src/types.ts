@@ -61,6 +61,10 @@ export interface GenerateOptions {
   seed?: number | null;
   /** "best" (SFT, 50 steps) or "fast" (turbo, 8 steps). */
   quality?: "best" | "fast";
+  /** How many takes of the same prompt, 1-4. */
+  variations?: number;
+  /** "mp3" or "wav24" for lossless. */
+  format?: "mp3" | "wav24";
 }
 
 /** Stages the backend reports while a song is being made. */
