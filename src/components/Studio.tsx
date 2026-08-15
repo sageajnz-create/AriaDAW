@@ -150,12 +150,13 @@ export default function Studio({ values, onChange, disabled, lyricsRef }: Props)
           disabled={disabled}
           aria-describedby="quality-hint"
         >
-          <option value="best">Best — richer sound, about 10 seconds longer</option>
-          <option value="fast">Fast — quicker to hear an idea</option>
+          <option value="best">Best — better words and richer sound (about a minute)</option>
+          <option value="fast">Fast — rougher, good for trying ideas (about 25 seconds)</option>
         </select>
         <p className="hint" id="quality-hint">
-          Best uses a slower, more detailed model. Both are free and unlimited —
-          this is only about how long you wait.
+          Best uses larger models that write more coherent lyrics, stay in the
+          language you picked, and produce fuller sound. Both are free and
+          unlimited — the only difference is how long you wait.
         </p>
       </div>
 

@@ -123,22 +123,32 @@ pub struct AvailableModels {
 }
 
 impl AvailableModels {
-    /// Largest installed language model. Lyric quality and consistency scale
-    /// noticeably with size — the 1.7B writes real verses on one run and bare
-    /// vocalisations on the next — so prefer the biggest one present.
+    fn lm_rank(name: &str) -> u8 {
+        if name.contains("-4B-") {
+            3
+        } else if name.contains("-1.7B-") {
+            2
+        } else if name.contains("-0.6B-") {
+            1
+        } else {
+            0
+        }
+    }
+
+    /// Largest installed language model.
+    ///
+    /// Size buys three things we measured over three runs each on the same
+    /// prompt: language reliability (4B 3/3 English, 1.7B 2/3 — one run came
+    /// back Dutch), subject adherence (4B mentioned the prompt's subject in
+    /// 2/3, the 1.7B in 0/3), and basic competence (one 1.7B run sang only
+    /// "Hmmm"). It costs about 20s more per song.
     pub fn best_lm(&self) -> Option<String> {
-        let rank = |n: &str| {
-            if n.contains("-4B-") {
-                3
-            } else if n.contains("-1.7B-") {
-                2
-            } else if n.contains("-0.6B-") {
-                1
-            } else {
-                0
-            }
-        };
-        self.lm.iter().max_by_key(|n| rank(n)).cloned()
+        self.lm.iter().max_by_key(|n| Self::lm_rank(n)).cloned()
+    }
+
+    /// Smallest installed language model, for the fast path.
+    pub fn fastest_lm(&self) -> Option<String> {
+        self.lm.iter().min_by_key(|n| Self::lm_rank(n)).cloned()
     }
 
     pub fn is_complete(&self) -> bool {

@@ -302,15 +302,19 @@ fn attempt_generation(
     ace: &AceClient,
 ) -> anyhow::Result<Track> {
     let models = st.engine.lock().unwrap().paths.available_models()?;
-    let lm_model = models
-        .best_lm()
+
+    // Quality picks a *pair* of models, because both halves matter and both
+    // cost time. Roughly, on a 60s song:
+    //   best — largest LM + SFT diffusion at 50 steps  (~55s)
+    //   fast — smallest LM + turbo diffusion at 8 steps (~23s)
+    // Best is the default: unlimited local generation means the only thing a
+    // slower setting spends is patience, and the whole point is that nobody is
+    // metering it.
+    let best_quality = opts.quality.as_deref() != Some("fast");
+
+    let lm_model = if best_quality { models.best_lm() } else { models.fastest_lm() }
         .ok_or_else(|| anyhow::anyhow!("no language model installed"))?;
 
-    // "Best" uses the SFT diffusion model at 50 steps; "fast" uses turbo at 8.
-    // Measured end to end on a 60s song: 33s vs 23s. Ten seconds is a cheap
-    // price for noticeably better production, so best is the default and fast
-    // is opt-in — the opposite of how a paid service would meter it.
-    let best_quality = opts.quality.as_deref() != Some("fast");
     let (dit_model, steps, shift) = match (best_quality, models.dit_sft.first()) {
         (true, Some(sft)) => (sft.clone(), 50, 1.0),
         _ => (
