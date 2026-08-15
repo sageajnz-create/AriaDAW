@@ -34,6 +34,12 @@
 
   --font: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, "JetBrains Mono", "Fira Code", monospace;
+
+  /* Tells the engine this is a dark UI, so native form controls — dropdown
+     lists, scrollbars, spinners — pick their own dark defaults instead of
+     black-on-black. Without it a closed <select> drew its text in the system
+     default near-black over our dark surface and was unreadable until opened. */
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }
@@ -203,6 +209,34 @@ textarea, input[type="text"], input[type="number"], select {
 }
 textarea::placeholder { color: var(--text-faint); }
 textarea:hover, input:hover, select:hover { border-color: var(--accent); }
+
+/* Options are drawn by the platform and don't inherit the select's colours,
+   so they're set explicitly for both the closed control and the open list. */
+select option,
+select optgroup {
+  background-color: var(--surface);
+  color: var(--text);
+}
+select option:checked,
+select option:hover {
+  background-color: var(--surface-2);
+  color: var(--accent);
+}
+
+/* Give the select a caret of our own; the platform one is drawn in the same
+   default colour that caused the problem. */
+select {
+  appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position:
+    calc(100% - 20px) calc(50% + 2px),
+    calc(100% - 14px) calc(50% + 2px);
+  background-size: 6px 6px, 6px 6px;
+  background-repeat: no-repeat;
+  padding-right: 40px;
+}
 
 .prompt-box { min-height: 116px; font-size: 1.05rem; line-height: 1.5; }
 
