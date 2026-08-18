@@ -147,6 +147,25 @@ export const api = {
     return (await tauri()).invoke<string>("remake_like", { id, keepWords });
   },
 
+  /** Keep only a section of a song, as a new track. Instant: no engine. */
+  trimTrack: async (id: string, start: number, end: number): Promise<Track> => {
+    if (!isDesktop) {
+      const source = previewLibrary.find((t) => t.id === id) ?? previewLibrary[0];
+      const made: Track = {
+        ...source,
+        id: `preview-trim-${Date.now()}`,
+        title: `${source.title} (shorter)`,
+        duration: end - start,
+        parent_id: source.id,
+        operation: `trimmed ${Math.round(start)}-${Math.round(end)}s`,
+        favorite: false,
+      };
+      previewLibrary = [made, ...previewLibrary];
+      return made;
+    }
+    return (await tauri()).invoke<Track>("trim_track", { id, start, end });
+  },
+
   /** Copy songs out under readable names, with covers and an .m3u. */
   exportTracks: async (
     ids: string[],

@@ -9,6 +9,7 @@ mod export;
 mod library;
 mod lyrics;
 mod models;
+mod trim;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -240,6 +241,74 @@ fn rename_track(state: State<'_, Arc<AppState>>, id: String, title: String) -> R
 #[tauri::command]
 fn delete_track(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
     state.library.lock().unwrap().delete(&id).map_err(|e| e.to_string())
+}
+
+/// Keep only a section of a song, as a new track.
+///
+/// Alone among the derived operations this never touches the engine: it copies
+/// the bytes that were already there, on their own frame boundaries. That makes
+/// it instant, and — the part that matters — it cannot change how the kept
+/// section sounds, which re-encoding a 320 kbps MP3 to cut its intro would.
+#[tauri::command]
+async fn trim_track(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    start: f64,
+    end: f64,
+) -> Result<Track, String> {
+    let st = Arc::clone(&state);
+    tauri::async_runtime::spawn_blocking(move || {
+        let (source, audio_dir) = {
+            let lib = st.library.lock().unwrap();
+            let t = lib
+                .get(&id)
+                .map_err(|e| e.to_string())?
+                .ok_or("That song isn't in your library anymore.")?;
+            (t, lib.audio_dir.clone())
+        };
+
+        let input = PathBuf::from(&source.audio_path);
+        if !input.exists() {
+            return Err("That song's file isn't where Aria left it.".into());
+        }
+        let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("mp3").to_string();
+
+        let new_id = uuid::Uuid::new_v4().to_string();
+        let output = audio_dir.join(format!("{new_id}.{ext}"));
+        // Held no lock across the copy: it is file I/O on an arbitrarily large
+        // song, and the library has to stay usable while it runs.
+        let duration = trim::trim(&input, start, end, &output).map_err(|e| e.to_string())?;
+
+        let track = Track {
+            id: new_id,
+            title: format!("{} (shorter)", source.title),
+            prompt: source.prompt.clone(),
+            caption: source.caption.clone(),
+            lyrics: source.lyrics.clone(),
+            bpm: source.bpm,
+            keyscale: source.keyscale.clone(),
+            timesignature: source.timesignature.clone(),
+            vocal_language: source.vocal_language.clone(),
+            duration,
+            seed: source.seed,
+            model: source.model.clone(),
+            audio_path: output.display().to_string(),
+            // The parent's latent describes the whole song, so it would be
+            // wrong for a section. Better absent than misleading: using this
+            // track as a voice reference will encode from its own audio.
+            latent_path: None,
+            created_at: now_secs(),
+            parent_id: Some(source.id.clone()),
+            operation: Some(format!("trimmed {start:.0}-{end:.0}s")),
+            favorite: false,
+            lyricist: source.lyricist.clone(),
+            missing: false,
+        };
+        st.library.lock().unwrap().insert(&track).map_err(|e| e.to_string())?;
+        Ok(track)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Copy songs out of the library under names a person can read.
@@ -1404,6 +1473,7 @@ pub fn run() {
             set_favorite,
             rename_track,
             delete_track,
+            trim_track,
             export_tracks,
             list_personas,
             create_persona,

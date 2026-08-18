@@ -671,6 +671,7 @@ export default function Library({
                   supportsStems={supportsStems}
                   busy={busy}
                   onStarted={onDeriveStarted}
+                  onTrimmed={onChanged}
                 />
 
                 {lyricsOpen && (

@@ -289,12 +289,29 @@ song and an `.m3u` using relative paths so the folder still plays after it is
 moved. A track whose file has been moved outside the app is reported and
 skipped rather than failing the whole run.
 
-### Phase 7 — Remaining parity gaps
+### Phase 7 — Trim
+
+Alone among the derived operations, trim never touches the engine. It copies the
+bytes that were already there, on their own frame boundaries: WAV on a sample
+frame with the original `fmt ` chunk carried across verbatim, MP3 by dropping
+whole frames. That makes it instant and free, but the reason it is built this
+way is quality — re-encoding a 320 kbps MP3 to cut ten seconds off the front
+would quietly degrade the whole song.
+
+Formats Aria cannot cut without a decoder it doesn't ship — FLAC, Opus, M4A —
+are refused by name rather than mangled. Any Xing/Info header is dropped, since
+it describes the length of the file we just cut down. The trimmed track carries
+no latent: the parent's describes the whole song, and absent beats misleading.
+
+Verified against real LAME output, not just synthetic frames: a WAV cut is
+byte-identical to the corresponding region of its source, and an MP3 cut lands
+within a millisecond of what ffprobe reports, at the same measured loudness.
+
+### Phase 8 — Remaining parity gaps
 
 | Gap | Notes |
 |---|---|
 | Follow-along lyrics | Suno scrolls the words with playback. The engine gives us no timing data, so this needs either forced alignment or an honest per-section estimate — not a fake one. |
-| Trim / crop | Cut a song down to a section and keep it as its own track. |
 | Video export | Suno's shareable MP4 is cover art plus audio. Needs ffmpeg, which is a real dependency decision, not a small one. |
 
 Deliberately **not** pursued: publishing, sharing feeds, and public profiles.

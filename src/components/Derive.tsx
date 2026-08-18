@@ -5,7 +5,7 @@ import type { StemChoice, Track } from "../types";
 /** Things you can make from a song you already have.
  *  Suno charges for stem separation and section editing; here they're just
  *  part of the app. */
-type Panel = "stems" | "extend" | "cover" | "section" | "more" | null;
+type Panel = "stems" | "extend" | "cover" | "section" | "shorten" | "more" | null;
 
 /** mm:ss for the section editor, where seconds matter. */
 function clock(seconds: number): string {
@@ -19,9 +19,14 @@ interface Props {
   supportsStems: boolean;
   busy: boolean;
   onStarted: (jobId: string) => void;
+  /** Trim finishes immediately rather than through the job events, so it
+   *  reports back on its own. */
+  onTrimmed: () => void;
 }
 
-export default function Derive({ track, supportsStems, busy, onStarted }: Props) {
+export default function Derive({
+  track, supportsStems, busy, onStarted, onTrimmed,
+}: Props) {
   const [panel, setPanel] = useState<Panel>(null);
   const [stems, setStems] = useState<StemChoice[]>([]);
   const [stem, setStem] = useState("vocals");
@@ -30,12 +35,30 @@ export default function Derive({ track, supportsStems, busy, onStarted }: Props)
   const [secStart, setSecStart] = useState(0);
   const [secEnd, setSecEnd] = useState(Math.min(15, Math.floor(track.duration)));
   const [secStyle, setSecStyle] = useState("");
+  const [keepFrom, setKeepFrom] = useState(0);
+  const [keepTo, setKeepTo] = useState(Math.min(30, Math.floor(track.duration)));
+  const [trimming, setTrimming] = useState(false);
+  const [trimError, setTrimError] = useState<string | null>(null);
 
   useEffect(() => {
     if (panel === "stems" && stems.length === 0) {
       api.stemChoices().then(setStems).catch(() => {});
     }
   }, [panel, stems.length]);
+
+  async function shorten() {
+    setTrimError(null);
+    setTrimming(true);
+    try {
+      await api.trimTrack(track.id, keepFrom, keepTo);
+      setPanel(null);
+      onTrimmed();
+    } catch (e) {
+      setTrimError(String(e));
+    } finally {
+      setTrimming(false);
+    }
+  }
 
   async function run(operation: Record<string, unknown>) {
     try {
@@ -71,6 +94,16 @@ export default function Derive({ track, supportsStems, busy, onStarted }: Props)
           disabled={busy}
         >
           Make longer
+        </button>
+        <button
+          type="button"
+          className="btn btn-icon"
+          onClick={() => setPanel(panel === "shorten" ? null : "shorten")}
+          aria-expanded={panel === "shorten"}
+          disabled={busy}
+          title="Keep only part of this song — instant, and it doesn't re-record anything"
+        >
+          Make shorter
         </button>
         <button
           type="button"
@@ -143,6 +176,65 @@ export default function Derive({ track, supportsStems, busy, onStarted }: Props)
               </button>
             )}
           </div>
+        </div>
+      )}
+
+      {panel === "shorten" && (
+        <div className="derive-panel">
+          <p className="hint" style={{ marginTop: 0 }}>
+            Keeps the part you choose as a new song, and leaves this one alone.
+            This one is instant — it copies the sound you already have instead of
+            recording it again, so nothing about it changes.
+          </p>
+          <div className="grid-2">
+            <div className="field">
+              <label htmlFor={`k0-${track.id}`}>Keep from {clock(keepFrom)}</label>
+              <input
+                id={`k0-${track.id}`}
+                type="range"
+                min={0}
+                max={Math.max(1, Math.floor(track.duration) - 1)}
+                step={1}
+                value={keepFrom}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setKeepFrom(v);
+                  if (v >= keepTo) setKeepTo(Math.min(Math.floor(track.duration), v + 5));
+                }}
+                disabled={busy || trimming}
+                aria-valuetext={clock(keepFrom)}
+              />
+            </div>
+            <div className="field">
+              <label htmlFor={`k1-${track.id}`}>Keep until {clock(keepTo)}</label>
+              <input
+                id={`k1-${track.id}`}
+                type="range"
+                min={1}
+                max={Math.max(2, Math.floor(track.duration))}
+                step={1}
+                value={keepTo}
+                onChange={(e) => setKeepTo(Math.max(keepFrom + 1, Number(e.target.value)))}
+                disabled={busy || trimming}
+                aria-valuetext={clock(keepTo)}
+              />
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={shorten}
+            disabled={busy || trimming || keepTo - keepFrom < 1}
+          >
+            {trimming
+              ? "Cutting…"
+              : `Keep ${clock(keepFrom)}–${clock(keepTo)} (${clock(keepTo - keepFrom)} long)`}
+          </button>
+          {trimError && (
+            <p className="notice notice-err" role="alert" style={{ marginTop: 12 }}>
+              {trimError}
+            </p>
+          )}
         </div>
       )}
 
