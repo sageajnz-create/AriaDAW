@@ -1,4 +1,6 @@
-import type { EngineStatus, GenerateOptions, Persona, Playlist, Track } from "./types";
+import type {
+  EngineStatus, ExportReport, GenerateOptions, Persona, Playlist, Track,
+} from "./types";
 import { isDesktop, previewArt, previewStatus, previewTracks } from "./preview";
 
 // Tauri modules are imported lazily so a plain browser tab doesn't blow up on
@@ -143,6 +145,18 @@ export const api = {
   remakeLike: async (id: string, keepWords: boolean): Promise<string> => {
     if (!isDesktop) return `preview-remake-${Date.now()}`;
     return (await tauri()).invoke<string>("remake_like", { id, keepWords });
+  },
+
+  /** Copy songs out under readable names, with covers and an .m3u. */
+  exportTracks: async (
+    ids: string[],
+    dest: string,
+    playlistName: string | null,
+  ): Promise<ExportReport> => {
+    if (!isDesktop) {
+      return { folder: dest, written: ids.length, skipped: [], playlist_file: "Preview.m3u" };
+    }
+    return (await tauri()).invoke<ExportReport>("export_tracks", { ids, dest, playlistName });
   },
 
   listPersonas: async (): Promise<Persona[]> => {
@@ -296,6 +310,15 @@ export async function pickAudioFile(): Promise<string | null> {
     multiple: false,
     filters: [{ name: "Audio", extensions: ["mp3", "wav", "flac", "ogg", "m4a", "opus"] }],
   });
+  return typeof picked === "string" ? picked : null;
+}
+
+/** Ask where to put an export. Returns null if the user cancels. */
+export async function pickFolder(defaultPath?: string): Promise<string | null> {
+  // The preview has no file dialogs; a stand-in path keeps the flow reviewable.
+  if (!isDesktop) return "~/Music/Aria exports";
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const picked = await open({ directory: true, defaultPath });
   return typeof picked === "string" ? picked : null;
 }
 

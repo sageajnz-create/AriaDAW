@@ -5,6 +5,7 @@ mod audio_server;
 mod client;
 mod derive;
 mod engine;
+mod export;
 mod library;
 mod lyrics;
 mod models;
@@ -239,6 +240,39 @@ fn rename_track(state: State<'_, Arc<AppState>>, id: String, title: String) -> R
 #[tauri::command]
 fn delete_track(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
     state.library.lock().unwrap().delete(&id).map_err(|e| e.to_string())
+}
+
+/// Copy songs out of the library under names a person can read.
+///
+/// Off the main thread: this is arbitrarily many multi-megabyte file copies,
+/// and blocking the UI thread on a slow disk or a USB stick would freeze the
+/// window for the whole export.
+#[tauri::command]
+async fn export_tracks(
+    state: State<'_, Arc<AppState>>,
+    ids: Vec<String>,
+    dest: String,
+    playlist_name: Option<String>,
+) -> Result<export::ExportReport, String> {
+    if ids.is_empty() {
+        return Err("There are no songs to export.".into());
+    }
+    let st = Arc::clone(&state);
+    tauri::async_runtime::spawn_blocking(move || {
+        // Resolved in the order asked for, so an exported playlist keeps its
+        // running order rather than the library's.
+        let lib = st.library.lock().unwrap();
+        let tracks: Vec<Track> = ids
+            .iter()
+            .filter_map(|id| lib.get(id).ok().flatten())
+            .collect();
+        drop(lib);
+
+        export::export(&tracks, std::path::Path::new(&dest), playlist_name.as_deref())
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1370,6 +1404,7 @@ pub fn run() {
             set_favorite,
             rename_track,
             delete_track,
+            export_tracks,
             list_personas,
             create_persona,
             rename_persona,

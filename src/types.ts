@@ -23,6 +23,15 @@ export interface Track {
   missing?: boolean;
 }
 
+/** What an export actually did. */
+export interface ExportReport {
+  folder: string;
+  written: number;
+  /** Titles whose audio wasn't where the library expected it. */
+  skipped: string[];
+  playlist_file: string | null;
+}
+
 /** A singer you saved, with its own copy of the voice reference. */
 export interface Persona {
   id: string;

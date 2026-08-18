@@ -261,7 +261,7 @@ Done:
   Deleting a playlist never deletes music, and deleting a song takes it out of
   every playlist it was in.
 
-### Phase 6 — Saved voices
+### Phase 6 — Saved voices, and getting your music out
 
 A persona is a singer you named and kept. The engine already took timbre from a
 reference without borrowing its notes or words; what was missing was the ability
@@ -280,13 +280,21 @@ A persona also carries the tempo and key it was captured with, applied only
 where the user left those controls on automatic. A saved singer supplies
 defaults; it does not overrule a stated intent.
 
+**Export** closes the other half of the ownership promise. The library folder
+already holds plain files, but every one of them is named by uuid — a fine
+primary key and a terrible thing to hand someone who wants to put a playlist on
+a phone. Export copies whatever is on screen (so a search or a filter narrows it
+too), numbered in running order under readable names, with each cover beside its
+song and an `.m3u` using relative paths so the folder still plays after it is
+moved. A track whose file has been moved outside the app is reported and
+skipped rather than failing the whole run.
+
 ### Phase 7 — Remaining parity gaps
 
 | Gap | Notes |
 |---|---|
 | Follow-along lyrics | Suno scrolls the words with playback. The engine gives us no timing data, so this needs either forced alignment or an honest per-section estimate — not a fake one. |
 | Trim / crop | Cut a song down to a section and keep it as its own track. |
-| Export a playlist | Copy a playlist's audio into one folder, in order, with the covers. |
 | Video export | Suno's shareable MP4 is cover art plus audio. Needs ffmpeg, which is a real dependency decision, not a small one. |
 
 Deliberately **not** pursued: publishing, sharing feeds, and public profiles.

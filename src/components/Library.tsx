@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, formatDate, formatDuration, trackArtUrl } from "../api";
+import { api, formatDate, formatDuration, pickFolder, trackArtUrl } from "../api";
 import Derive from "./Derive";
 import type { Player } from "../player";
-import type { Playlist, Track } from "../types";
+import type { ExportReport, Playlist, Track } from "../types";
 
 interface Props {
   tracks: Track[];
@@ -30,6 +30,9 @@ export default function Library({
   const [addingTo, setAddingTo] = useState<string | null>(null);
   const [savingVoice, setSavingVoice] = useState<string | null>(null);
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exported, setExported] = useState<ExportReport | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<Scope>({ kind: "all" });
   const [sort, setSort] = useState<Sort>("newest");
@@ -93,6 +96,30 @@ export default function Library({
     }
     return sorted;
   }, [tracks, activePlaylist, scope.kind, query, sort]);
+
+  /** What the exported playlist file should be called. */
+  function scopeName(): string {
+    if (activePlaylist) return activePlaylist.name;
+    if (scope.kind === "favourites") return "Favourites";
+    return "Aria songs";
+  }
+
+  async function exportVisible() {
+    setExportError(null);
+    setExported(null);
+    const dest = await pickFolder(await api.libraryFolder());
+    if (!dest) return;
+    setExporting(true);
+    try {
+      // Exports what is on screen, so a search or a filter narrows it the same
+      // way it narrows everything else.
+      setExported(await api.exportTracks(visible.map((t) => t.id), dest, scopeName()));
+    } catch (e) {
+      setExportError(String(e));
+    } finally {
+      setExporting(false);
+    }
+  }
 
   function chooseScope(next: Scope) {
     setScope(next);
@@ -229,6 +256,16 @@ export default function Library({
           >
             ▶ Play {activePlaylist ? "this playlist" : "these"}
           </button>
+
+          <button
+            type="button"
+            className="btn"
+            disabled={visible.length === 0 || exporting}
+            onClick={exportVisible}
+            title="Copy these songs somewhere else, named so you can read them"
+          >
+            {exporting ? "Copying…" : "Export…"}
+          </button>
         </div>
 
         {activePlaylist && (
@@ -292,6 +329,50 @@ export default function Library({
           </div>
         )}
       </div>
+
+      {(exported || exportError) && (
+        <div
+          className={"notice " + (exportError ? "notice-err" : "notice-info")}
+          role="status"
+        >
+          <p>
+            {exportError ? (
+              <>
+                <strong>That export didn't finish</strong>
+                {exportError}
+              </>
+            ) : (
+              <>
+                <strong>
+                  Copied {exported!.written} song{exported!.written === 1 ? "" : "s"} to{" "}
+                  {exported!.folder}
+                </strong>
+                Numbered in order, with the covers beside them
+                {exported!.playlist_file ? ` and ${exported!.playlist_file}` : ""}. They're
+                ordinary files now — nothing here is needed to play them.
+                {exported!.skipped.length > 0 && (
+                  <>
+                    {" "}
+                    Skipped {exported!.skipped.length} whose files weren't where Aria
+                    left them: {exported!.skipped.join(", ")}.
+                  </>
+                )}
+              </>
+            )}
+          </p>
+          <button
+            type="button"
+            className="btn btn-icon"
+            style={{ marginTop: 10 }}
+            onClick={() => {
+              setExported(null);
+              setExportError(null);
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <p className="result-count" aria-live="polite">
         {visible.length === tracks.length
