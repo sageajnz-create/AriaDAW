@@ -1226,8 +1226,24 @@ pub fn run() {
             download_models,
             log_ui_error,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Aria");
+        .build(tauri::generate_context!())
+        .expect("error while starting Aria")
+        .run(|app, event| {
+            // Shut the engine down explicitly on exit.
+            //
+            // This used to be left to PR_SET_PDEATHSIG, which fires on the
+            // parent *thread* rather than the process and so killed the engine
+            // about thirty seconds into every session. With that corrected, the
+            // app has to take responsibility for the child itself: several GB
+            // of VRAM should not outlive the window that asked for it.
+            if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {
+                if let Some(state) = app.try_state::<Arc<AppState>>() {
+                    if let Ok(mut eng) = state.engine.lock() {
+                        eng.stop();
+                    }
+                }
+            }
+        });
 }
 
 /// Languages the UI offers. ACE-Step supports 50+; these are the common ones,

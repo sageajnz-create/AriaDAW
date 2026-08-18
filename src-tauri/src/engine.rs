@@ -209,11 +209,57 @@ impl Engine {
         self.log_tail.lock().unwrap().clone()
     }
 
+    /// Kill an engine left behind by a previous run.
+    ///
+    /// Exit handlers cover a clean quit and PR_SET_PDEATHSIG covers a parent
+    /// that dies while the spawning thread is still alive, but neither survives
+    /// a SIGKILL or a hard crash — and an orphan holds several GB of VRAM and
+    /// our port. Reclaiming at startup is the one check that catches every case,
+    /// because it runs regardless of how the last session ended.
+    ///
+    /// Deliberately narrow: only processes whose command line names *our*
+    /// binary and *our* port, and never the current process.
+    #[cfg(target_os = "linux")]
+    fn reclaim_orphan(&self) {
+        let me = std::process::id();
+        let Ok(entries) = std::fs::read_dir("/proc") else { return };
+        for entry in entries.flatten() {
+            let Some(pid) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else {
+                continue;
+            };
+            if pid == me {
+                continue;
+            }
+            let Ok(raw) = std::fs::read(entry.path().join("cmdline")) else { continue };
+            // /proc cmdline is NUL-separated.
+            let cmdline = String::from_utf8_lossy(&raw).replace('\0', " ");
+            let ours = cmdline.contains("ace-server")
+                && cmdline.contains(&format!("--port {PORT}"))
+                && cmdline.contains(&self.paths.models_dir.display().to_string());
+            if ours {
+                eprintln!("[engine] reclaiming orphaned engine (pid {pid}) from a previous run");
+                unsafe {
+                    libc::kill(pid as libc::pid_t, libc::SIGTERM);
+                }
+                // Give it a moment to release the GPU before we ask for it.
+                std::thread::sleep(Duration::from_millis(800));
+                unsafe {
+                    libc::kill(pid as libc::pid_t, libc::SIGKILL);
+                }
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn reclaim_orphan(&self) {}
+
     /// Spawn the server and block until it answers /health.
     pub fn start(&mut self) -> Result<()> {
         if matches!(self.state(), EngineState::Ready | EngineState::Starting) {
             return Ok(());
         }
+        // Before binding our port, take back anything a previous run stranded.
+        self.reclaim_orphan();
         *self.state.lock().unwrap() = EngineState::Starting;
         self.log_tail.lock().unwrap().clear();
 
@@ -249,18 +295,38 @@ impl Engine {
             cmd.env("GGML_BACKEND", "cpu");
         }
 
-        // Tie the engine's life to ours. `Drop` handles a clean shutdown, but it
-        // never runs on SIGKILL or a hard crash — and an orphaned ace-server keeps
-        // several GB of VRAM allocated with no UI left to free it. Observed for
-        // real: killing the app left ace-server resident.
+        // Tie the engine's life to ours, so a force-quit can't strand a process
+        // holding several GB of VRAM with no UI left to free it.
+        //
+        // PR_SET_PDEATHSIG fires when the parent *THREAD* exits, not the parent
+        // process. That is the whole trap: we spawn from a `spawn_blocking`
+        // worker, and when tokio retires that idle worker the kernel promptly
+        // SIGTERMs the engine. Measured: the engine went zombie about 30
+        // seconds after every startup, and only survived at all because
+        // `run_generation` notices the death and restarts it — so every song
+        // silently paid for a fresh multi-gigabyte model load.
+        //
+        // The signal is therefore armed against the thread that owns the
+        // engine's whole lifetime, and only if that thread is still the one
+        // that spawned it. Everything else is handled by `Drop` and by the
+        // explicit shutdown on app exit.
         #[cfg(target_os = "linux")]
         unsafe {
             use std::os::unix::process::CommandExt;
-            cmd.pre_exec(|| {
-                // Ask the kernel to SIGTERM this child when its parent dies.
-                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 {
-                    return Err(std::io::Error::last_os_error());
+            // The tid of the thread doing the spawn, captured before the fork.
+            let spawning_tid = libc::syscall(libc::SYS_gettid) as libc::pid_t;
+            cmd.pre_exec(move || {
+                // Only meaningful when the spawning thread is the process's
+                // main thread; otherwise that thread can retire long before the
+                // app does and take the engine with it.
+                if spawning_tid == libc::getpid() {
+                    if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
                 }
+                // Put the child in its own process group so a Ctrl-C to the
+                // terminal doesn't race our own shutdown handling.
+                libc::setpgid(0, 0);
                 Ok(())
             });
         }
