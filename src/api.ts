@@ -1,5 +1,5 @@
-import type { EngineStatus, GenerateOptions, Track } from "./types";
-import { isDesktop, previewStatus, previewTracks } from "./preview";
+import type { EngineStatus, GenerateOptions, Playlist, Track } from "./types";
+import { isDesktop, previewArt, previewStatus, previewTracks } from "./preview";
 
 // Tauri modules are imported lazily so a plain browser tab doesn't blow up on
 // load. See preview.ts for why browser mode exists at all.
@@ -9,6 +9,9 @@ async function tauri() {
 
 /** In-memory store standing in for the library when previewing in a browser. */
 let previewLibrary: Track[] = [...previewTracks];
+let previewPlaylists: Playlist[] = [
+  { id: "preview-pl", name: "Late night", created_at: 0, track_ids: ["preview-2"] },
+];
 
 export const api = {
   engineStatus: async (): Promise<EngineStatus> => {
@@ -132,6 +135,75 @@ export const api = {
     return (await tauri()).invoke<string>("remake_like", { id, keepWords });
   },
 
+  listPlaylists: async (): Promise<Playlist[]> => {
+    if (!isDesktop) return previewPlaylists;
+    return (await tauri()).invoke<Playlist[]>("list_playlists");
+  },
+
+  createPlaylist: async (name: string): Promise<Playlist> => {
+    if (!isDesktop) {
+      const made = { id: `pl-${Date.now()}`, name, created_at: 0, track_ids: [] };
+      previewPlaylists = [...previewPlaylists, made];
+      return made;
+    }
+    return (await tauri()).invoke<Playlist>("create_playlist", { name });
+  },
+
+  renamePlaylist: async (id: string, name: string): Promise<void> => {
+    if (!isDesktop) {
+      previewPlaylists = previewPlaylists.map((p) => (p.id === id ? { ...p, name } : p));
+      return;
+    }
+    return (await tauri()).invoke<void>("rename_playlist", { id, name });
+  },
+
+  deletePlaylist: async (id: string): Promise<void> => {
+    if (!isDesktop) {
+      previewPlaylists = previewPlaylists.filter((p) => p.id !== id);
+      return;
+    }
+    return (await tauri()).invoke<void>("delete_playlist", { id });
+  },
+
+  addToPlaylist: async (playlistId: string, trackId: string): Promise<void> => {
+    if (!isDesktop) {
+      previewPlaylists = previewPlaylists.map((p) =>
+        p.id === playlistId && !p.track_ids.includes(trackId)
+          ? { ...p, track_ids: [...p.track_ids, trackId] }
+          : p,
+      );
+      return;
+    }
+    return (await tauri()).invoke<void>("add_to_playlist", { playlistId, trackId });
+  },
+
+  removeFromPlaylist: async (playlistId: string, trackId: string): Promise<void> => {
+    if (!isDesktop) {
+      previewPlaylists = previewPlaylists.map((p) =>
+        p.id === playlistId ? { ...p, track_ids: p.track_ids.filter((t) => t !== trackId) } : p,
+      );
+      return;
+    }
+    return (await tauri()).invoke<void>("remove_from_playlist", { playlistId, trackId });
+  },
+
+  /** `delta` is -1 to move a song earlier in the playlist, 1 for later. */
+  moveInPlaylist: async (playlistId: string, trackId: string, delta: number): Promise<void> => {
+    if (!isDesktop) {
+      previewPlaylists = previewPlaylists.map((p) => {
+        if (p.id !== playlistId) return p;
+        const at = p.track_ids.indexOf(trackId);
+        const to = at + delta;
+        if (at < 0 || to < 0 || to >= p.track_ids.length) return p;
+        const ids = [...p.track_ids];
+        [ids[at], ids[to]] = [ids[to], ids[at]];
+        return { ...p, track_ids: ids };
+      });
+      return;
+    }
+    return (await tauri()).invoke<void>("move_in_playlist", { playlistId, trackId, delta });
+  },
+
   audioOutputAvailable: async (): Promise<boolean> => {
     if (!isDesktop) return true;
     return (await tauri()).invoke<boolean>("audio_output_available");
@@ -157,6 +229,17 @@ export async function loadAudioBase(): Promise<void> {
 export function trackAudioUrl(id: string): string {
   if (!isDesktop || !audioBase) return "";
   return `${audioBase}/track/${encodeURIComponent(id)}`;
+}
+
+/**
+ * The track's cover art. Drawn by the backend from the track id, so it is
+ * stable forever and costs no GPU time; the same picture is written beside the
+ * audio file as an ordinary SVG the user keeps.
+ */
+export function trackArtUrl(id: string): string {
+  if (!isDesktop) return previewArt(id);
+  if (!audioBase) return "";
+  return `${audioBase}/art/${encodeURIComponent(id)}`;
 }
 
 /** Ask for an audio file to import. Returns null if the user cancels. */

@@ -1,5 +1,6 @@
 //! Aria — free, unlimited, local AI music creation.
 
+mod art;
 mod audio_server;
 mod client;
 mod derive;
@@ -18,7 +19,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use client::{AceClient, JobStatus, SynthSources};
 use engine::{AvailableModels, Engine, EnginePaths, EngineSettings, EngineState};
-use library::{Library, Track};
+use library::{Library, Playlist, Track};
 
 /// How many times we'll shrink the VAE chunk and retry after a GPU device loss
 /// before giving up on the GPU and decoding on the CPU.
@@ -229,6 +230,80 @@ fn rename_track(state: State<'_, Arc<AppState>>, id: String, title: String) -> R
 #[tauri::command]
 fn delete_track(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
     state.library.lock().unwrap().delete(&id).map_err(|e| e.to_string())
+}
+
+/// Playlists are small — a few hundred ids at most — so the whole set goes to
+/// the UI in one call and every membership question is answered locally.
+#[tauri::command]
+fn list_playlists(state: State<'_, Arc<AppState>>) -> Result<Vec<Playlist>, String> {
+    state.library.lock().unwrap().playlists().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn create_playlist(state: State<'_, Arc<AppState>>, name: String) -> Result<Playlist, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("A playlist needs a name.".into());
+    }
+    state.library.lock().unwrap().create_playlist(name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn rename_playlist(state: State<'_, Arc<AppState>>, id: String, name: String) -> Result<(), String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("A playlist needs a name.".into());
+    }
+    state.library.lock().unwrap().rename_playlist(&id, name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_playlist(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
+    state.library.lock().unwrap().delete_playlist(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn add_to_playlist(
+    state: State<'_, Arc<AppState>>,
+    playlist_id: String,
+    track_id: String,
+) -> Result<(), String> {
+    state
+        .library
+        .lock()
+        .unwrap()
+        .add_to_playlist(&playlist_id, &track_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn remove_from_playlist(
+    state: State<'_, Arc<AppState>>,
+    playlist_id: String,
+    track_id: String,
+) -> Result<(), String> {
+    state
+        .library
+        .lock()
+        .unwrap()
+        .remove_from_playlist(&playlist_id, &track_id)
+        .map_err(|e| e.to_string())
+}
+
+/// `delta` is -1 for earlier, 1 for later.
+#[tauri::command]
+fn move_in_playlist(
+    state: State<'_, Arc<AppState>>,
+    playlist_id: String,
+    track_id: String,
+    delta: i64,
+) -> Result<(), String> {
+    state
+        .library
+        .lock()
+        .unwrap()
+        .move_in_playlist(&playlist_id, &track_id, delta)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1212,6 +1287,13 @@ pub fn run() {
             set_favorite,
             rename_track,
             delete_track,
+            list_playlists,
+            create_playlist,
+            rename_playlist,
+            delete_playlist,
+            add_to_playlist,
+            remove_from_playlist,
+            move_in_playlist,
             library_folder,
             languages,
             default_language,

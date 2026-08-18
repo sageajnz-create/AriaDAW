@@ -239,6 +239,41 @@ Lineage tree in the library UI.
 Full keyboard and screen-reader pass, contrast audit, AppImage / .deb / Flatpak,
 polished first-run experience.
 
+### Phase 5 — The shell around the model
+
+Phases 0–3 got the *capabilities* past Suno. What was still missing was the part
+that makes a generator feel like a music app: somewhere for the songs to live,
+a way to play them, and a way to find one again a month later.
+
+Done:
+
+- **Cover art for every song.** Drawn deterministically from the track id in
+  `src-tauri/src/art.rs` — no image model, no second download, no GPU time, and
+  the same picture on every machine forever. Written beside the audio as an
+  ordinary SVG the user keeps, and served from the local audio server at
+  `/art/<id>`.
+- **One player with a queue.** Play-through, next/previous, shuffle, repeat
+  (off/all/one), seek and volume. Replaces the per-row `<audio>` elements, which
+  meant there was no such thing as "playing your songs", only playing one song.
+- **Search, filter and order.** Searches titles, prompts, styles *and lyrics* —
+  you remember a line from a song far more often than what you called the file.
+- **Playlists.** Named, ordered, reorderable; a song can sit in several at once.
+  Deleting a playlist never deletes music, and deleting a song takes it out of
+  every playlist it was in.
+
+### Phase 6 — Remaining parity gaps
+
+| Gap | Notes |
+|---|---|
+| Named personas | `voice_from` and "more like this" already exist; what's missing is *saving* a voice/style under a name and reusing it, rather than pointing at a track each time. |
+| Follow-along lyrics | Suno scrolls the words with playback. The engine gives us no timing data, so this needs either forced alignment or an honest per-section estimate — not a fake one. |
+| Trim / crop | Cut a song down to a section and keep it as its own track. |
+| Export a playlist | Copy a playlist's audio into one folder, in order, with the covers. |
+| Video export | Suno's shareable MP4 is cover art plus audio. Needs ffmpeg, which is a real dependency decision, not a small one. |
+
+Deliberately **not** pursued: publishing, sharing feeds, and public profiles.
+Those need a server, and a server is the thing Aria exists not to have.
+
 ---
 
 ## Risks

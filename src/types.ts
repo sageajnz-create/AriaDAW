@@ -23,6 +23,14 @@ export interface Track {
   missing?: boolean;
 }
 
+export interface Playlist {
+  id: string;
+  name: string;
+  created_at: number;
+  /** Track ids, in playing order. */
+  track_ids: string[];
+}
+
 export interface StemChoice {
   id: string;
   name: string;

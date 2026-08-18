@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useState } from "react";
 import Create from "./components/Create";
 import LibraryView from "./components/Library";
+import PlayerBar from "./components/Player";
 import Setup from "./components/Setup";
 import { api, loadAudioBase, onEvent, openFolder, pickAudioFile } from "./api";
+import { usePlayer } from "./player";
 import { isDesktop } from "./preview";
-import type { EngineStatus, Track } from "./types";
+import type { EngineStatus, Playlist, Track } from "./types";
 
 type Tab = "create" | "library";
 
 export default function App() {
   const [tab, setTab] = useState<Tab>("create");
   const [tracks, setTracks] = useState<Track[]>([]);
+  const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [status, setStatus] = useState<EngineStatus | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
   const [largeText, setLargeText] = useState(false);
@@ -25,6 +28,8 @@ export default function App() {
   // whole app is unusable without them, so setup takes over the window.
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
   const [importing, setImporting] = useState(false);
+  // One player for the whole app; the library only ever hands it a queue.
+  const player = usePlayer();
 
   // Bringing in your own recording unlocks every derived operation on it —
   // stems from a demo, a restyle of a voice memo. Suno's free tier has no
@@ -45,6 +50,14 @@ export default function App() {
   const refreshTracks = useCallback(async () => {
     try {
       setTracks(await api.listTracks());
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
+  const refreshPlaylists = useCallback(async () => {
+    try {
+      setPlaylists(await api.listPlaylists());
     } catch (e) {
       console.error(e);
     }
@@ -77,6 +90,7 @@ export default function App() {
 
       await refreshStatus();
       await refreshTracks();
+      await refreshPlaylists();
       setCanPlayAudio(await api.audioOutputAvailable());
       try {
         await api.startEngine();
@@ -85,7 +99,7 @@ export default function App() {
       }
       await refreshStatus();
     })();
-  }, [refreshStatus, refreshTracks]);
+  }, [refreshStatus, refreshTracks, refreshPlaylists]);
 
   useEffect(() => {
     document.body.classList.toggle("text-large", largeText);
@@ -167,6 +181,7 @@ export default function App() {
                 setNeedsSetup(false);
                 await refreshStatus();
                 await refreshTracks();
+                await refreshPlaylists();
                 try {
                   await api.startEngine();
                 } catch (e) {
@@ -259,16 +274,21 @@ export default function App() {
               </div>
               <LibraryView
                 tracks={tracks}
+                playlists={playlists}
                 onChanged={refreshTracks}
+                onPlaylistsChanged={refreshPlaylists}
                 supportsStems={!!status?.supports_stems}
                 busy={deriving}
                 onDeriveStarted={() => setDeriving(true)}
+                player={player}
               />
             </div>
           )}
         </main>
         </>
         )}
+
+        <PlayerBar player={player} />
 
         <footer className="footer">
           <span>

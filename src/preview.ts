@@ -27,6 +27,29 @@ We carved out our own space
 In this midnight waltz, love's secret melody
 With you in my arms, we set our spirits free`;
 
+/**
+ * A stand-in cover for browser-preview mode.
+ *
+ * The real artwork is drawn in Rust (`src-tauri/src/art.rs`) and fetched from
+ * the local audio server, which doesn't exist in a plain browser tab. This is
+ * deliberately *not* a port of that generator — two implementations of the same
+ * picture would drift. It only has to fill the same space so layout, focus
+ * order and alt text can be checked.
+ */
+export function previewArt(id: string): string {
+  let h = 2166136261;
+  for (const ch of id) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+  const hue = Math.abs(h) % 360;
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640">` +
+    `<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1">` +
+    `<stop offset="0" stop-color="hsl(${hue} 60% 16%)"/>` +
+    `<stop offset="1" stop-color="hsl(${(hue + 140) % 360} 65% 42%)"/>` +
+    `</linearGradient></defs>` +
+    `<rect width="640" height="640" fill="url(#g)"/></svg>`;
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}
+
 export const previewTracks: Track[] = [
   {
     id: "preview-1",

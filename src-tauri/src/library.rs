@@ -46,6 +46,21 @@ pub struct Track {
     pub missing: bool,
 }
 
+/// A named, ordered set of tracks.
+///
+/// Membership travels with the playlist rather than the track, so a song can
+/// sit in several at once and removing it from one is not a deletion. Ids are
+/// returned inline because a library that fits in memory makes a round trip per
+/// playlist pure overhead — the UI needs the whole picture to render chips.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Playlist {
+    pub id: String,
+    pub name: String,
+    pub created_at: i64,
+    /// Track ids in playing order.
+    pub track_ids: Vec<String>,
+}
+
 pub struct Library {
     conn: Connection,
     pub audio_dir: PathBuf,
@@ -88,6 +103,25 @@ impl Library {
 
             CREATE INDEX IF NOT EXISTS idx_tracks_created ON tracks(created_at DESC);
             CREATE INDEX IF NOT EXISTS idx_tracks_parent  ON tracks(parent_id);
+
+            CREATE TABLE IF NOT EXISTS playlists (
+                id          TEXT PRIMARY KEY,
+                name        TEXT NOT NULL,
+                created_at  INTEGER NOT NULL
+            );
+
+            -- Membership cascades from both sides: deleting a playlist must not
+            -- touch the music, and deleting a song must not leave a hole in a
+            -- playlist that then fails to play.
+            CREATE TABLE IF NOT EXISTS playlist_tracks (
+                playlist_id TEXT NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+                track_id    TEXT NOT NULL REFERENCES tracks(id)    ON DELETE CASCADE,
+                position    INTEGER NOT NULL,
+                PRIMARY KEY (playlist_id, track_id)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_playlist_order
+                ON playlist_tracks(playlist_id, position);
             "#,
         )?;
 
@@ -158,11 +192,135 @@ impl Library {
     pub fn delete(&self, id: &str) -> Result<()> {
         if let Some(t) = self.get(id)? {
             let _ = std::fs::remove_file(&t.audio_path);
+            let _ = std::fs::remove_file(crate::art::path_beside(&t.audio_path));
             if let Some(l) = &t.latent_path {
                 let _ = std::fs::remove_file(l);
             }
         }
         self.conn.execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    // -- Playlists ------------------------------------------------------
+
+    pub fn playlists(&self) -> Result<Vec<Playlist>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id,name,created_at FROM playlists ORDER BY created_at")?;
+        let heads = stmt
+            .query_map([], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        let mut members = self.conn.prepare(
+            "SELECT track_id FROM playlist_tracks WHERE playlist_id = ?1 ORDER BY position",
+        )?;
+        heads
+            .into_iter()
+            .map(|(id, name, created_at)| {
+                let track_ids = members
+                    .query_map([&id], |r| r.get::<_, String>(0))?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(Playlist { id, name, created_at, track_ids })
+            })
+            .collect()
+    }
+
+    pub fn create_playlist(&self, name: &str) -> Result<Playlist> {
+        let id = uuid::Uuid::new_v4().to_string();
+        let created_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        self.conn.execute(
+            "INSERT INTO playlists (id,name,created_at) VALUES (?1,?2,?3)",
+            params![id, name, created_at],
+        )?;
+        Ok(Playlist { id, name: name.to_string(), created_at, track_ids: Vec::new() })
+    }
+
+    pub fn rename_playlist(&self, id: &str, name: &str) -> Result<()> {
+        self.conn
+            .execute("UPDATE playlists SET name = ?2 WHERE id = ?1", params![id, name])?;
+        Ok(())
+    }
+
+    /// Removes the playlist only. The songs in it are untouched — a playlist is
+    /// a view of the library, never a container that owns what it lists.
+    pub fn delete_playlist(&self, id: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM playlists WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Append to the end. Adding a track that's already there is a no-op rather
+    /// than an error, so a double click can't produce a duplicate row.
+    pub fn add_to_playlist(&self, playlist_id: &str, track_id: &str) -> Result<()> {
+        let next: i64 = self.conn.query_row(
+            "SELECT COALESCE(MAX(position), -1) + 1 FROM playlist_tracks WHERE playlist_id = ?1",
+            params![playlist_id],
+            |r| r.get(0),
+        )?;
+        self.conn.execute(
+            "INSERT OR IGNORE INTO playlist_tracks (playlist_id,track_id,position)
+             VALUES (?1,?2,?3)",
+            params![playlist_id, track_id, next],
+        )?;
+        Ok(())
+    }
+
+    pub fn remove_from_playlist(&self, playlist_id: &str, track_id: &str) -> Result<()> {
+        self.conn.execute(
+            "DELETE FROM playlist_tracks WHERE playlist_id = ?1 AND track_id = ?2",
+            params![playlist_id, track_id],
+        )?;
+        Ok(())
+    }
+
+    /// Move a track one step earlier (`-1`) or later (`1`) in the playlist.
+    ///
+    /// Swaps the two positions rather than renumbering the list, so the cost
+    /// doesn't grow with the playlist and concurrent readers never see a gap.
+    pub fn move_in_playlist(&self, playlist_id: &str, track_id: &str, delta: i64) -> Result<()> {
+        let here: i64 = match self.conn.query_row(
+            "SELECT position FROM playlist_tracks WHERE playlist_id = ?1 AND track_id = ?2",
+            params![playlist_id, track_id],
+            |r| r.get(0),
+        ) {
+            Ok(p) => p,
+            Err(rusqlite::Error::QueryReturnedNoRows) => return Ok(()),
+            Err(e) => return Err(e.into()),
+        };
+
+        // The neighbour in that direction, whatever its position number is.
+        let neighbour: Option<(String, i64)> = self
+            .conn
+            .query_row(
+                if delta < 0 {
+                    "SELECT track_id, position FROM playlist_tracks
+                     WHERE playlist_id = ?1 AND position < ?2
+                     ORDER BY position DESC LIMIT 1"
+                } else {
+                    "SELECT track_id, position FROM playlist_tracks
+                     WHERE playlist_id = ?1 AND position > ?2
+                     ORDER BY position ASC LIMIT 1"
+                },
+                params![playlist_id, here],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .ok();
+
+        // Already at the end it was asked to move towards.
+        let Some((other_id, there)) = neighbour else { return Ok(()) };
+
+        self.conn.execute(
+            "UPDATE playlist_tracks SET position = ?3 WHERE playlist_id = ?1 AND track_id = ?2",
+            params![playlist_id, track_id, there],
+        )?;
+        self.conn.execute(
+            "UPDATE playlist_tracks SET position = ?3 WHERE playlist_id = ?1 AND track_id = ?2",
+            params![playlist_id, other_id, here],
+        )?;
         Ok(())
     }
 
@@ -241,6 +399,46 @@ mod tests {
 
         lib.set_favorite("a", true).unwrap();
         assert!(lib.get("a").unwrap().unwrap().favorite);
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn playlists_hold_an_order_and_release_deleted_tracks() {
+        let dir = std::env::temp_dir().join(format!("aria-test-{}", uuid::Uuid::new_v4()));
+        let lib = Library::open(&dir, &dir.join("audio")).unwrap();
+        for id in ["a", "b", "c"] {
+            lib.insert(&sample(id)).unwrap();
+        }
+
+        let pl = lib.create_playlist("Late night").unwrap();
+        for id in ["a", "b", "c"] {
+            lib.add_to_playlist(&pl.id, id).unwrap();
+        }
+        // Adding twice must not duplicate.
+        lib.add_to_playlist(&pl.id, "b").unwrap();
+        let ids = |l: &Library| l.playlists().unwrap()[0].track_ids.clone();
+        assert_eq!(ids(&lib), vec!["a", "b", "c"]);
+
+        lib.move_in_playlist(&pl.id, "c", -1).unwrap();
+        assert_eq!(ids(&lib), vec!["a", "c", "b"]);
+        // Moving past either end is a no-op, not an error or a wrap-around.
+        lib.move_in_playlist(&pl.id, "a", -1).unwrap();
+        assert_eq!(ids(&lib), vec!["a", "c", "b"]);
+
+        lib.remove_from_playlist(&pl.id, "c").unwrap();
+        assert_eq!(ids(&lib), vec!["a", "b"]);
+        // Removing from a playlist is not a deletion.
+        assert!(lib.get("c").unwrap().is_some());
+
+        // Deleting the song itself does take it out of the playlist.
+        lib.delete("a").unwrap();
+        assert_eq!(ids(&lib), vec!["b"]);
+
+        // And deleting the playlist leaves the music alone.
+        lib.delete_playlist(&pl.id).unwrap();
+        assert!(lib.playlists().unwrap().is_empty());
+        assert!(lib.get("b").unwrap().is_some());
 
         std::fs::remove_dir_all(&dir).ok();
     }

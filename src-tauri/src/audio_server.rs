@@ -73,6 +73,8 @@ fn header_value(request: &tiny_http::Request, name: &'static str) -> Option<Stri
 
 enum Reply {
     Full { path: PathBuf, len: u64, mime: &'static str },
+    /// Generated on the spot rather than read from disk — cover art.
+    Inline { body: String, mime: &'static str },
     Partial { path: PathBuf, start: u64, end: u64, total: u64, mime: &'static str },
     Denied(u16, String),
 }
@@ -101,8 +103,8 @@ fn handle(
         Some(_) => return Reply::Denied(403, "bad token".into()),
         None => return Reply::Denied(404, "not found".into()),
     };
-    let id = match rest.strip_prefix("track/") {
-        Some(i) if !i.is_empty() => i,
+    let (kind, id) = match rest.split_once('/') {
+        Some((k, i)) if !i.is_empty() => (k, i),
         _ => return Reply::Denied(404, "not a track url".into()),
     };
 
@@ -111,6 +113,18 @@ fn handle(
         Ok(None) => return Reply::Denied(404, "no such track".into()),
         Err(e) => return Reply::Denied(500, format!("library error: {e}")),
     };
+
+    if kind == "art" {
+        // Drawn from the id, so it costs nothing to reproduce and never
+        // depends on the audio file still being where we left it. Saving a
+        // copy beside the audio is what makes it the user's, not ours.
+        let svg = crate::art::svg_for(&track.id);
+        crate::art::save_beside(&track.audio_path, &svg);
+        return Reply::Inline { body: svg, mime: "image/svg+xml" };
+    }
+    if kind != "track" {
+        return Reply::Denied(404, "not a track url".into());
+    }
 
     let path = PathBuf::from(&track.audio_path);
     let total = match std::fs::metadata(&path) {
@@ -151,6 +165,12 @@ fn respond(request: tiny_http::Request, reply: Reply) -> std::io::Result<()> {
             let audio = ctype(mime);
             let file = std::fs::File::open(&path)?;
             let resp = Response::new(StatusCode(200), vec![audio, ranges], file, Some(len as usize), None);
+            request.respond(resp)
+        }
+        Reply::Inline { body, mime } => {
+            // Deterministic for the life of the track, so the webview may keep it.
+            let cache = Header::from_bytes(&b"Cache-Control"[..], &b"max-age=86400"[..]).unwrap();
+            let resp = Response::from_string(body).with_header(ctype(mime)).with_header(cache);
             request.respond(resp)
         }
         Reply::Partial { path, start, end, total, mime } => {
