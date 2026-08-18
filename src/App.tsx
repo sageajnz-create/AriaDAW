@@ -6,7 +6,7 @@ import Setup from "./components/Setup";
 import { api, loadAudioBase, onEvent, openFolder, pickAudioFile } from "./api";
 import { usePlayer } from "./player";
 import { isDesktop } from "./preview";
-import type { EngineStatus, Playlist, Track } from "./types";
+import type { EngineStatus, Persona, Playlist, Track } from "./types";
 
 type Tab = "create" | "library";
 
@@ -14,6 +14,7 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("create");
   const [tracks, setTracks] = useState<Track[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
+  const [personas, setPersonas] = useState<Persona[]>([]);
   const [status, setStatus] = useState<EngineStatus | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
   const [largeText, setLargeText] = useState(false);
@@ -63,6 +64,14 @@ export default function App() {
     }
   }, []);
 
+  const refreshPersonas = useCallback(async () => {
+    try {
+      setPersonas(await api.listPersonas());
+    } catch (e) {
+      console.error(e);
+    }
+  }, []);
+
   const refreshStatus = useCallback(async () => {
     try {
       setStatus(await api.engineStatus());
@@ -91,6 +100,7 @@ export default function App() {
       await refreshStatus();
       await refreshTracks();
       await refreshPlaylists();
+      await refreshPersonas();
       setCanPlayAudio(await api.audioOutputAvailable());
       try {
         await api.startEngine();
@@ -99,7 +109,7 @@ export default function App() {
       }
       await refreshStatus();
     })();
-  }, [refreshStatus, refreshTracks, refreshPlaylists]);
+  }, [refreshStatus, refreshTracks, refreshPlaylists, refreshPersonas]);
 
   useEffect(() => {
     document.body.classList.toggle("text-large", largeText);
@@ -182,6 +192,7 @@ export default function App() {
                 await refreshStatus();
                 await refreshTracks();
                 await refreshPlaylists();
+                await refreshPersonas();
                 try {
                   await api.startEngine();
                 } catch (e) {
@@ -254,7 +265,13 @@ export default function App() {
 
           {tab === "create" ? (
             <div role="tabpanel" id="panel-create" aria-labelledby="tab-create">
-              <Create onCreated={onCreated} engineReady={!!ready} tracks={tracks} />
+              <Create
+                onCreated={onCreated}
+                engineReady={!!ready}
+                tracks={tracks}
+                personas={personas}
+                onPersonasChanged={refreshPersonas}
+              />
             </div>
           ) : (
             <div role="tabpanel" id="panel-library" aria-labelledby="tab-library">
@@ -281,6 +298,7 @@ export default function App() {
                 busy={deriving}
                 onDeriveStarted={() => setDeriving(true)}
                 player={player}
+                onPersonaSaved={refreshPersonas}
               />
             </div>
           )}

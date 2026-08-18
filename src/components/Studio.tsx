@@ -1,4 +1,6 @@
-import type { GenerateOptions } from "../types";
+import { useState } from "react";
+import { api } from "../api";
+import type { GenerateOptions, Persona } from "../types";
 
 /** Structure tags the model understands. Inserted for the user so nobody has to
  *  memorise syntax to get a chorus. */
@@ -32,11 +34,18 @@ interface Props {
   lyricsRef: React.RefObject<HTMLTextAreaElement>;
   /** Tracks that can act as a voice reference. */
   voiceChoices: Array<{ id: string; title: string }>;
+  /** Voices the user has saved and named. */
+  personas: Persona[];
+  onPersonasChanged: () => void;
 }
 
+/** Marks a select option as a saved persona rather than a track id. */
+const PERSONA_PREFIX = "persona:";
+
 export default function Studio({
-  values, onChange, disabled, lyricsRef, voiceChoices,
+  values, onChange, disabled, lyricsRef, voiceChoices, personas, onPersonasChanged,
 }: Props) {
+  const [editingPersona, setEditingPersona] = useState<string | null>(null);
   /** Insert a tag at the cursor, keeping focus where the user was typing. */
   function insertTag(tag: string) {
     const el = lyricsRef.current;
@@ -185,9 +194,9 @@ export default function Studio({
         </div>
       </div>
 
-      {voiceChoices.length > 0 && (
+      {(personas.length > 0 || voiceChoices.length > 0) && (
         <div className="field">
-          <label htmlFor="voiceFrom">Sing it in the voice from…</label>
+          <label htmlFor="voiceFrom">Who should sing it?</label>
           <select
             id="voiceFrom"
             value={values.voiceFrom}
@@ -196,17 +205,98 @@ export default function Studio({
             aria-describedby="voice-hint"
           >
             <option value="">A new voice each time</option>
-            {voiceChoices.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.title}
-              </option>
-            ))}
+            {/* Saved voices first: they were named on purpose, and they keep
+                working even after the song they came from is deleted. */}
+            {personas.length > 0 && (
+              <optgroup label="Voices you saved">
+                {personas.map((p) => (
+                  <option key={p.id} value={PERSONA_PREFIX + p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </optgroup>
+            )}
+            {voiceChoices.length > 0 && (
+              <optgroup label="Any song in your library">
+                {voiceChoices.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.title}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
           <p className="hint" id="voice-hint">
-            Borrows the singer's tone from a song you already have, without
-            copying its tune or words — so one voice can carry across everything
-            you make. Works with imported recordings too.
+            Borrows the singer's tone without copying the tune or words, so one
+            voice can carry across everything you make. Works with imported
+            recordings too. Save a voice from any song in <strong>My songs</strong>,
+            and it stays even if you delete that song.
           </p>
+
+          {personas.length > 0 && (
+            <div className="persona-list">
+              {personas.map((p) =>
+                editingPersona === p.id ? (
+                  <form
+                    key={p.id}
+                    className="inline-form"
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      const value = new FormData(e.currentTarget).get("name");
+                      if (typeof value === "string" && value.trim()) {
+                        await api.renamePersona(p.id, value.trim());
+                        setEditingPersona(null);
+                        onPersonasChanged();
+                      }
+                    }}
+                  >
+                    <label htmlFor={`pn-${p.id}`}>New name</label>
+                    <input id={`pn-${p.id}`} name="name" defaultValue={p.name} autoFocus />
+                    <button type="submit" className="btn">Save</button>
+                    <button
+                      type="button"
+                      className="btn btn-icon"
+                      onClick={() => setEditingPersona(null)}
+                    >
+                      Cancel
+                    </button>
+                  </form>
+                ) : (
+                  <div key={p.id} className="persona-row">
+                    <span className="persona-name">{p.name}</span>
+                    <span className="persona-meta">
+                      {p.bpm ? `${p.bpm} BPM` : ""}
+                      {p.bpm && p.keyscale ? " · " : ""}
+                      {p.keyscale ?? ""}
+                    </span>
+                    <button
+                      type="button"
+                      className="btn btn-icon"
+                      onClick={() => setEditingPersona(p.id)}
+                      disabled={disabled}
+                    >
+                      Rename
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-icon"
+                      disabled={disabled}
+                      onClick={async () => {
+                        await api.deletePersona(p.id);
+                        // Don't leave the picker pointing at a voice that's gone.
+                        if (values.voiceFrom === PERSONA_PREFIX + p.id) {
+                          onChange({ voiceFrom: "" });
+                        }
+                        onPersonasChanged();
+                      }}
+                    >
+                      Forget
+                    </button>
+                  </div>
+                ),
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -264,6 +354,11 @@ export function studioToOptions(v: StudioValues): Partial<GenerateOptions> {
     quality: v.quality,
     variations: v.variations,
     format: v.format,
-    voice_from: v.voiceFrom || null,
+    // One control, two destinations: a saved persona carries its own copy of
+    // the reference, while a bare track id points into the library.
+    voice_from: v.voiceFrom.startsWith(PERSONA_PREFIX) ? null : v.voiceFrom || null,
+    persona: v.voiceFrom.startsWith(PERSONA_PREFIX)
+      ? v.voiceFrom.slice(PERSONA_PREFIX.length)
+      : null,
   };
 }

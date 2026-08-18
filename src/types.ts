@@ -23,6 +23,21 @@ export interface Track {
   missing?: boolean;
 }
 
+/** A singer you saved, with its own copy of the voice reference. */
+export interface Persona {
+  id: string;
+  name: string;
+  caption: string;
+  bpm: number | null;
+  keyscale: string | null;
+  vocal_language: string | null;
+  voice_path: string;
+  voice_is_latent: boolean;
+  /** Provenance only — the song may since have been deleted. */
+  source_track_id: string | null;
+  created_at: number;
+}
+
 export interface Playlist {
   id: string;
   name: string;
@@ -75,6 +90,8 @@ export interface GenerateOptions {
   format?: "mp3" | "wav24";
   /** Track id whose singer this song should sound like. */
   voice_from?: string | null;
+  /** Id of a saved persona. Wins over voice_from when both are set. */
+  persona?: string | null;
 }
 
 /** Stages the backend reports while a song is being made. */

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, onEvent } from "../api";
 import { isDesktop, runPreviewGeneration } from "../preview";
 import Studio, { studioToOptions, type StudioValues } from "./Studio";
-import type { StageEvent, Track } from "../types";
+import type { Persona, StageEvent, Track } from "../types";
 
 /** Plain-language labels. No jargon — the person using this may not make music. */
 const STAGE_TEXT: Record<string, string> = {
@@ -19,9 +19,14 @@ interface Props {
   engineReady: boolean;
   /** Existing tracks, offered as voice references. */
   tracks: Track[];
+  /** Voices the user has saved and named. */
+  personas: Persona[];
+  onPersonasChanged: () => void;
 }
 
-export default function Create({ onCreated, engineReady, tracks }: Props) {
+export default function Create({
+  onCreated, engineReady, tracks, personas, onPersonasChanged,
+}: Props) {
   const [prompt, setPrompt] = useState("");
   const [instrumental, setInstrumental] = useState(false);
   const [duration, setDuration] = useState(60);
@@ -255,6 +260,8 @@ export default function Create({ onCreated, engineReady, tracks }: Props) {
                 .filter((t) => !t.missing)
                 .slice(0, 40)
                 .map((t) => ({ id: t.id, title: t.title }))}
+              personas={personas}
+              onPersonasChanged={onPersonasChanged}
             />
           </div>
         )}

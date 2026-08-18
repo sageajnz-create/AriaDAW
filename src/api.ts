@@ -1,4 +1,4 @@
-import type { EngineStatus, GenerateOptions, Playlist, Track } from "./types";
+import type { EngineStatus, GenerateOptions, Persona, Playlist, Track } from "./types";
 import { isDesktop, previewArt, previewStatus, previewTracks } from "./preview";
 
 // Tauri modules are imported lazily so a plain browser tab doesn't blow up on
@@ -9,6 +9,16 @@ async function tauri() {
 
 /** In-memory store standing in for the library when previewing in a browser. */
 let previewLibrary: Track[] = [...previewTracks];
+let previewPersonas: Persona[] = [
+  {
+    id: "preview-persona",
+    name: "The folk singer",
+    caption: "A warm and intimate indie folk track built around a clean, fingerpicked guitar.",
+    bpm: 158, keyscale: "B♭ major", vocal_language: "en",
+    voice_path: "", voice_is_latent: true,
+    source_track_id: "preview-1", created_at: 0,
+  },
+];
 let previewPlaylists: Playlist[] = [
   { id: "preview-pl", name: "Late night", created_at: 0, track_ids: ["preview-2"] },
 ];
@@ -133,6 +143,42 @@ export const api = {
   remakeLike: async (id: string, keepWords: boolean): Promise<string> => {
     if (!isDesktop) return `preview-remake-${Date.now()}`;
     return (await tauri()).invoke<string>("remake_like", { id, keepWords });
+  },
+
+  listPersonas: async (): Promise<Persona[]> => {
+    if (!isDesktop) return previewPersonas;
+    return (await tauri()).invoke<Persona[]>("list_personas");
+  },
+
+  /** Save a track's singer under a name. The reference is copied, so the
+   *  persona keeps working if that song is later deleted. */
+  createPersona: async (name: string, trackId: string): Promise<Persona> => {
+    if (!isDesktop) {
+      const made: Persona = {
+        id: `persona-${Date.now()}`, name, caption: "", bpm: null, keyscale: null,
+        vocal_language: null, voice_path: "", voice_is_latent: true,
+        source_track_id: trackId, created_at: 0,
+      };
+      previewPersonas = [...previewPersonas, made];
+      return made;
+    }
+    return (await tauri()).invoke<Persona>("create_persona", { name, trackId });
+  },
+
+  renamePersona: async (id: string, name: string): Promise<void> => {
+    if (!isDesktop) {
+      previewPersonas = previewPersonas.map((p) => (p.id === id ? { ...p, name } : p));
+      return;
+    }
+    return (await tauri()).invoke<void>("rename_persona", { id, name });
+  },
+
+  deletePersona: async (id: string): Promise<void> => {
+    if (!isDesktop) {
+      previewPersonas = previewPersonas.filter((p) => p.id !== id);
+      return;
+    }
+    return (await tauri()).invoke<void>("delete_persona", { id });
   },
 
   listPlaylists: async (): Promise<Playlist[]> => {

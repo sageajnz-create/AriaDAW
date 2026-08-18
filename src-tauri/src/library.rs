@@ -61,9 +61,38 @@ pub struct Playlist {
     pub track_ids: Vec<String>,
 }
 
+/// A singer you saved.
+///
+/// The engine takes timbre from a reference without borrowing its notes or
+/// words, so one voice can carry across a whole set of songs — Suno calls this
+/// a Persona. Aria's version keeps its **own copy** of the reference rather than
+/// pointing at a track id, because a voice you named and reused should not
+/// quietly stop working the day you tidy up the song it came from.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Persona {
+    pub id: String,
+    pub name: String,
+    /// The description of the song this voice was captured from, kept so the
+    /// UI can say what it sounds like without opening the source track.
+    pub caption: String,
+    pub bpm: Option<i64>,
+    pub keyscale: Option<String>,
+    pub vocal_language: Option<String>,
+    pub voice_path: String,
+    /// True when `voice_path` holds a cached latent rather than audio.
+    pub voice_is_latent: bool,
+    /// Provenance only — may name a track that no longer exists.
+    pub source_track_id: Option<String>,
+    pub created_at: i64,
+}
+
 pub struct Library {
     conn: Connection,
     pub audio_dir: PathBuf,
+    /// Owned copies of persona voice references. These live with the app data,
+    /// not in the music folder: they are working material for the engine, not
+    /// songs, and nobody wants them cluttering the folder they browse.
+    pub personas_dir: PathBuf,
 }
 
 impl Library {
@@ -122,6 +151,23 @@ impl Library {
 
             CREATE INDEX IF NOT EXISTS idx_playlist_order
                 ON playlist_tracks(playlist_id, position);
+
+            -- `source_track_id` is deliberately NOT a foreign key. It records
+            -- where a voice came from, and nothing more: a persona keeps its
+            -- own copy of the reference, so deleting the song it was captured
+            -- from must leave the persona working.
+            CREATE TABLE IF NOT EXISTS personas (
+                id              TEXT PRIMARY KEY,
+                name            TEXT NOT NULL,
+                caption         TEXT NOT NULL DEFAULT '',
+                bpm             INTEGER,
+                keyscale        TEXT,
+                vocal_language  TEXT,
+                voice_path      TEXT NOT NULL,
+                voice_is_latent INTEGER NOT NULL DEFAULT 0,
+                source_track_id TEXT,
+                created_at      INTEGER NOT NULL
+            );
             "#,
         )?;
 
@@ -133,7 +179,11 @@ impl Library {
             let _ = conn.execute(stmt, []);
         }
 
-        Ok(Self { conn, audio_dir: audio_dir.to_path_buf() })
+        Ok(Self {
+            conn,
+            audio_dir: audio_dir.to_path_buf(),
+            personas_dir: data_dir.join("personas"),
+        })
     }
 
     pub fn insert(&self, t: &Track) -> Result<()> {
@@ -324,11 +374,128 @@ impl Library {
         Ok(())
     }
 
+    // -- Personas -------------------------------------------------------
+
+    pub fn personas(&self) -> Result<Vec<Persona>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id,name,caption,bpm,keyscale,vocal_language,voice_path,voice_is_latent,
+                    source_track_id,created_at
+             FROM personas ORDER BY created_at",
+        )?;
+        let rows = stmt.query_map([], row_to_persona)?;
+        Ok(rows.collect::<std::result::Result<Vec<_>, _>>()?)
+    }
+
+    pub fn persona(&self, id: &str) -> Result<Option<Persona>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id,name,caption,bpm,keyscale,vocal_language,voice_path,voice_is_latent,
+                    source_track_id,created_at
+             FROM personas WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map([id], row_to_persona)?;
+        Ok(rows.next().transpose()?)
+    }
+
+    /// Capture the voice of `source` under `name`.
+    ///
+    /// Copies the reference rather than borrowing it. The cached latent is
+    /// preferred where there is one: it is what the engine actually consumes,
+    /// it is far smaller than the audio, and reusing it skips a VAE encode
+    /// every time the persona sings.
+    pub fn create_persona(&self, name: &str, source: &Track) -> Result<Persona> {
+        std::fs::create_dir_all(&self.personas_dir)
+            .with_context(|| format!("creating {}", self.personas_dir.display()))?;
+
+        let latent = source
+            .latent_path
+            .as_ref()
+            .map(PathBuf::from)
+            .filter(|p| p.exists());
+        let audio = PathBuf::from(&source.audio_path);
+        let (from, voice_is_latent) = match latent {
+            Some(l) => (l, true),
+            None if audio.exists() => (audio, false),
+            None => anyhow::bail!(
+                "\"{}\" has no audio file where Aria left it, so its voice can't be saved.",
+                source.title
+            ),
+        };
+
+        let id = uuid::Uuid::new_v4().to_string();
+        let ext = if voice_is_latent {
+            "latent".to_string()
+        } else {
+            from.extension().and_then(|e| e.to_str()).unwrap_or("mp3").to_string()
+        };
+        let voice_path = self.personas_dir.join(format!("{id}.{ext}"));
+        std::fs::copy(&from, &voice_path)
+            .with_context(|| format!("copying {} to {}", from.display(), voice_path.display()))?;
+
+        let persona = Persona {
+            id,
+            name: name.to_string(),
+            caption: source.caption.clone(),
+            bpm: source.bpm,
+            keyscale: source.keyscale.clone(),
+            vocal_language: source.vocal_language.clone(),
+            voice_path: voice_path.display().to_string(),
+            voice_is_latent,
+            source_track_id: Some(source.id.clone()),
+            created_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0),
+        };
+        self.conn.execute(
+            "INSERT INTO personas
+             (id,name,caption,bpm,keyscale,vocal_language,voice_path,voice_is_latent,
+              source_track_id,created_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
+            params![
+                persona.id, persona.name, persona.caption, persona.bpm, persona.keyscale,
+                persona.vocal_language, persona.voice_path, persona.voice_is_latent as i32,
+                persona.source_track_id, persona.created_at
+            ],
+        )?;
+        Ok(persona)
+    }
+
+    pub fn rename_persona(&self, id: &str, name: &str) -> Result<()> {
+        self.conn
+            .execute("UPDATE personas SET name = ?2 WHERE id = ?1", params![id, name])?;
+        Ok(())
+    }
+
+    /// Removes the persona and the copy it owned. Nothing else — the song it
+    /// was captured from is untouched.
+    pub fn delete_persona(&self, id: &str) -> Result<()> {
+        if let Some(p) = self.persona(id)? {
+            let _ = std::fs::remove_file(&p.voice_path);
+        }
+        self.conn.execute("DELETE FROM personas WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
     pub fn count(&self) -> Result<i64> {
         Ok(self
             .conn
             .query_row("SELECT COUNT(*) FROM tracks", [], |r| r.get(0))?)
     }
+}
+
+fn row_to_persona(r: &rusqlite::Row) -> rusqlite::Result<Persona> {
+    Ok(Persona {
+        id: r.get(0)?,
+        name: r.get(1)?,
+        caption: r.get(2)?,
+        bpm: r.get(3)?,
+        keyscale: r.get(4)?,
+        vocal_language: r.get(5)?,
+        voice_path: r.get(6)?,
+        voice_is_latent: r.get::<_, i32>(7)? != 0,
+        source_track_id: r.get(8)?,
+        created_at: r.get(9)?,
+    })
 }
 
 fn row_to_track(r: &rusqlite::Row) -> rusqlite::Result<Track> {
@@ -439,6 +606,66 @@ mod tests {
         lib.delete_playlist(&pl.id).unwrap();
         assert!(lib.playlists().unwrap().is_empty());
         assert!(lib.get("b").unwrap().is_some());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_saved_voice_outlives_the_song_it_came_from() {
+        let dir = std::env::temp_dir().join(format!("aria-test-{}", uuid::Uuid::new_v4()));
+        let lib = Library::open(&dir, &dir.join("audio")).unwrap();
+
+        let mut t = sample("a");
+        t.audio_path = dir.join("a.mp3").display().to_string();
+        t.latent_path = Some(dir.join("a.latent").display().to_string());
+        std::fs::write(&t.audio_path, b"audio").unwrap();
+        std::fs::write(t.latent_path.as_ref().unwrap(), b"latent").unwrap();
+        lib.insert(&t).unwrap();
+
+        let p = lib.create_persona("My singer", &t).unwrap();
+        // The latent is preferred: it is what the engine consumes, and using it
+        // skips a VAE encode.
+        assert!(p.voice_is_latent);
+        assert_eq!(p.bpm, Some(120));
+        assert_eq!(std::fs::read(&p.voice_path).unwrap(), b"latent");
+
+        // The whole point: deleting the source must not break the persona.
+        lib.delete("a").unwrap();
+        let still = lib.personas().unwrap();
+        assert_eq!(still.len(), 1);
+        assert_eq!(std::fs::read(&still[0].voice_path).unwrap(), b"latent");
+        assert_eq!(still[0].source_track_id.as_deref(), Some("a"));
+
+        lib.rename_persona(&p.id, "Someone else").unwrap();
+        assert_eq!(lib.persona(&p.id).unwrap().unwrap().name, "Someone else");
+
+        lib.delete_persona(&p.id).unwrap();
+        assert!(lib.personas().unwrap().is_empty());
+        assert!(!std::path::Path::new(&p.voice_path).exists());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn a_voice_falls_back_to_audio_and_refuses_a_missing_file() {
+        let dir = std::env::temp_dir().join(format!("aria-test-{}", uuid::Uuid::new_v4()));
+        let lib = Library::open(&dir, &dir.join("audio")).unwrap();
+
+        // Imported songs have no cached latent, so the audio is the reference.
+        let mut t = sample("b");
+        t.audio_path = dir.join("b.mp3").display().to_string();
+        t.latent_path = None;
+        std::fs::write(&t.audio_path, b"audio").unwrap();
+        lib.insert(&t).unwrap();
+        let p = lib.create_persona("From a recording", &t).unwrap();
+        assert!(!p.voice_is_latent);
+        assert!(p.voice_path.ends_with(".mp3"));
+
+        // A track whose file was moved outside the app can't donate a voice,
+        // and must say so rather than saving an empty persona.
+        let gone = sample("c");
+        lib.insert(&gone).unwrap();
+        assert!(lib.create_persona("Nothing", &gone).is_err());
 
         std::fs::remove_dir_all(&dir).ok();
     }

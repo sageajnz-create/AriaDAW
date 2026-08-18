@@ -19,7 +19,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use client::{AceClient, JobStatus, SynthSources};
 use engine::{AvailableModels, Engine, EnginePaths, EngineSettings, EngineState};
-use library::{Library, Playlist, Track};
+use library::{Library, Persona, Playlist, Track};
 
 /// How many times we'll shrink the VAE chunk and retry after a GPU device loss
 /// before giving up on the GPU and decoding on the CPU.
@@ -102,6 +102,15 @@ pub struct GenerateOptions {
     /// track you already own rather than an account-bound artifact.
     #[serde(default)]
     pub voice_from: Option<String>,
+    /// Id of a saved persona to sing this song.
+    ///
+    /// Takes precedence over `voice_from`: a persona is a voice the user named
+    /// and kept, and it carries its own copy of the reference rather than
+    /// depending on a track still being in the library. It also supplies the
+    /// tempo and key it was captured with, but only where the user left those
+    /// on automatic — a saved singer should not overrule a stated intent.
+    #[serde(default)]
+    pub persona: Option<String>,
 }
 
 fn default_duration() -> f64 {
@@ -230,6 +239,47 @@ fn rename_track(state: State<'_, Arc<AppState>>, id: String, title: String) -> R
 #[tauri::command]
 fn delete_track(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
     state.library.lock().unwrap().delete(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn list_personas(state: State<'_, Arc<AppState>>) -> Result<Vec<Persona>, String> {
+    state.library.lock().unwrap().personas().map_err(|e| e.to_string())
+}
+
+/// Capture a track's singer under a name.
+///
+/// Copies the reference out of the library, so the persona keeps working after
+/// the song it came from is deleted, renamed or moved.
+#[tauri::command]
+fn create_persona(
+    state: State<'_, Arc<AppState>>,
+    name: String,
+    track_id: String,
+) -> Result<Persona, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Give this voice a name so you can find it later.".into());
+    }
+    let lib = state.library.lock().unwrap();
+    let track = lib
+        .get(&track_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("That song isn't in your library anymore.")?;
+    lib.create_persona(name, &track).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn rename_persona(state: State<'_, Arc<AppState>>, id: String, name: String) -> Result<(), String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("A voice needs a name.".into());
+    }
+    state.library.lock().unwrap().rename_persona(&id, name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn delete_persona(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
+    state.library.lock().unwrap().delete_persona(&id).map_err(|e| e.to_string())
 }
 
 /// Playlists are small — a few hundred ids at most — so the whole set goes to
@@ -554,8 +604,11 @@ fn remake_like(
         lyric_variety: None,
         variations: Some(1),
         format: Some(if track.audio_path.ends_with(".wav") { "wav24".into() } else { "mp3".into() }),
-        // Keep the singer, so a set of songs can hold together.
+        // Keep the singer, so a set of songs can hold together. Not a persona:
+        // this is explicitly "another one like *that* song", so the reference
+        // is that track rather than a voice saved under a name.
         voice_from: Some(track.id.clone()),
+        persona: None,
     };
 
     generate(app, state, options)
@@ -1039,6 +1092,14 @@ fn attempt_generation(
         None => opts.prompt.clone(),
     };
 
+    // Resolved before the request is built so it can fill the gaps the user
+    // left, rather than being bolted on at the end.
+    let persona = opts
+        .persona
+        .as_ref()
+        .filter(|id| !id.trim().is_empty())
+        .and_then(|id| st.library.lock().unwrap().persona(id).ok().flatten());
+
     let mut req = json!({
         "lm_model": lm_model,
         "synth_model": dit_model,
@@ -1074,10 +1135,19 @@ fn attempt_generation(
     // the user had written themselves.
     let keep_caption = expanded_style.is_some() || user_wrote_lyrics;
     req["use_cot_caption"] = json!(opts.embellish && !keep_caption);
-    if let Some(b) = opts.bpm.filter(|b| *b > 0) {
+    // A persona's tempo and key are defaults, not overrides: they apply only
+    // where the user left the control on automatic.
+    let bpm = opts.bpm.filter(|b| *b > 0).or_else(|| persona.as_ref().and_then(|p| p.bpm));
+    if let Some(b) = bpm {
         req["bpm"] = json!(b);
     }
-    if let Some(k) = opts.keyscale.as_ref().filter(|k| !k.trim().is_empty()) {
+    let keyscale = opts
+        .keyscale
+        .as_ref()
+        .filter(|k| !k.trim().is_empty())
+        .cloned()
+        .or_else(|| persona.as_ref().and_then(|p| p.keyscale.clone()));
+    if let Some(k) = keyscale {
         req["keyscale"] = json!(k);
     }
     if let Some(t) = opts.timesignature.as_ref().filter(|t| !t.trim().is_empty()) {
@@ -1104,20 +1174,33 @@ fn attempt_generation(
 
     // Voice reference, if one was chosen. The cached latent is preferred, same
     // as everywhere else, because it skips a VAE encode.
-    let voice: Option<SynthSources> = opts
-        .voice_from
-        .as_ref()
-        .filter(|id| !id.trim().is_empty())
-        .and_then(|id| st.library.lock().unwrap().get(id).ok().flatten())
-        .map(|t| {
-            let ref_latent = t.latent_path.as_ref().and_then(|p| std::fs::read(p).ok());
-            let ref_audio = if ref_latent.is_none() {
-                std::fs::read(&t.audio_path).ok()
+    //
+    // A saved persona wins over a track reference: it is the voice the user
+    // named, and it reads from its own copy, so it works even if the song it
+    // was captured from has since been deleted.
+    let voice: Option<SynthSources> = match persona.as_ref() {
+        Some(p) => std::fs::read(&p.voice_path).ok().map(|bytes| {
+            if p.voice_is_latent {
+                SynthSources { ref_latent: Some(bytes), ..Default::default() }
             } else {
-                None
-            };
-            SynthSources { ref_audio, ref_latent, ..Default::default() }
-        });
+                SynthSources { ref_audio: Some(bytes), ..Default::default() }
+            }
+        }),
+        None => opts
+            .voice_from
+            .as_ref()
+            .filter(|id| !id.trim().is_empty())
+            .and_then(|id| st.library.lock().unwrap().get(id).ok().flatten())
+            .map(|t| {
+                let ref_latent = t.latent_path.as_ref().and_then(|p| std::fs::read(p).ok());
+                let ref_audio = if ref_latent.is_none() {
+                    std::fs::read(&t.audio_path).ok()
+                } else {
+                    None
+                };
+                SynthSources { ref_audio, ref_latent, ..Default::default() }
+            }),
+    };
 
     let lm_id = ace.submit_lm(&req)?;
     wait_for(ace, &lm_id, app, job_id, "writing", "Writing the song")?;
@@ -1287,6 +1370,10 @@ pub fn run() {
             set_favorite,
             rename_track,
             delete_track,
+            list_personas,
+            create_persona,
+            rename_persona,
+            delete_persona,
             list_playlists,
             create_playlist,
             rename_playlist,

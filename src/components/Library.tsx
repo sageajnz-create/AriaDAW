@@ -13,6 +13,7 @@ interface Props {
   busy: boolean;
   onDeriveStarted: (jobId: string) => void;
   player: Player;
+  onPersonaSaved: () => void;
 }
 
 /** "All songs" and "Favourites" are scopes too, so one control covers them all. */
@@ -21,12 +22,14 @@ type Sort = "order" | "newest" | "oldest" | "longest" | "title";
 
 export default function Library({
   tracks, playlists, onChanged, onPlaylistsChanged,
-  supportsStems, busy, onDeriveStarted, player,
+  supportsStems, busy, onDeriveStarted, player, onPersonaSaved,
 }: Props) {
   const [openLyrics, setOpenLyrics] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [addingTo, setAddingTo] = useState<string | null>(null);
+  const [savingVoice, setSavingVoice] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<Scope>({ kind: "all" });
   const [sort, setSort] = useState<Sort>("newest");
@@ -401,6 +404,21 @@ export default function Library({
                       Add to…
                     </button>
 
+                    <button
+                      type="button"
+                      className="btn btn-icon"
+                      onClick={() => {
+                        setVoiceError(null);
+                        setSavingVoice(savingVoice === t.id ? null : t.id);
+                      }}
+                      aria-expanded={savingVoice === t.id}
+                      aria-controls={`voice-${t.id}`}
+                      disabled={t.missing}
+                      title="Keep this singer to use on other songs"
+                    >
+                      Save this voice
+                    </button>
+
                     {t.lyrics && (
                       <button
                         type="button"
@@ -471,6 +489,51 @@ export default function Library({
                       <input id={`np-${t.id}`} name="name" placeholder="Playlist name" />
                       <button type="submit" className="btn">Create and add</button>
                     </form>
+                  </div>
+                )}
+
+                {savingVoice === t.id && (
+                  <div className="add-to" id={`voice-${t.id}`}>
+                    <form
+                      className="inline-form"
+                      onSubmit={async (e) => {
+                        e.preventDefault();
+                        const value = new FormData(e.currentTarget).get("name");
+                        if (typeof value !== "string" || !value.trim()) return;
+                        try {
+                          await api.createPersona(value.trim(), t.id);
+                          setSavingVoice(null);
+                          setVoiceError(null);
+                          onPersonaSaved();
+                        } catch (err) {
+                          setVoiceError(String(err));
+                        }
+                      }}
+                    >
+                      <label htmlFor={`vn-${t.id}`}>Call this voice</label>
+                      <input
+                        id={`vn-${t.id}`}
+                        name="name"
+                        defaultValue={t.title}
+                        autoFocus
+                      />
+                      <button type="submit" className="btn">Save it</button>
+                      <button
+                        type="button"
+                        className="btn btn-icon"
+                        onClick={() => setSavingVoice(null)}
+                      >
+                        Cancel
+                      </button>
+                    </form>
+                    <p className="hint">
+                      Aria keeps its own copy, so this voice still works if you
+                      delete the song. Pick it under <strong>Create</strong> →
+                      detailed controls.
+                    </p>
+                    {voiceError && (
+                      <p className="notice notice-err" role="alert">{voiceError}</p>
+                    )}
                   </div>
                 )}
 

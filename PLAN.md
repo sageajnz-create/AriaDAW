@@ -261,11 +261,29 @@ Done:
   Deleting a playlist never deletes music, and deleting a song takes it out of
   every playlist it was in.
 
-### Phase 6 — Remaining parity gaps
+### Phase 6 — Saved voices
+
+A persona is a singer you named and kept. The engine already took timbre from a
+reference without borrowing its notes or words; what was missing was the ability
+to *keep* one, rather than scrolling a dropdown of every song you own and hoping
+you remember which one sounded right.
+
+Aria's version differs from Suno's in the way that matters: a persona holds its
+**own copy** of the reference, in the app's data folder. A voice you named and
+reused should not quietly stop working the day you tidy up the song it came
+from, so `source_track_id` is provenance only and deliberately not a foreign
+key. The cached latent is preferred over the audio where there is one — it is
+what the engine actually consumes, it is far smaller, and reusing it skips a VAE
+encode on every song the persona sings.
+
+A persona also carries the tempo and key it was captured with, applied only
+where the user left those controls on automatic. A saved singer supplies
+defaults; it does not overrule a stated intent.
+
+### Phase 7 — Remaining parity gaps
 
 | Gap | Notes |
 |---|---|
-| Named personas | `voice_from` and "more like this" already exist; what's missing is *saving* a voice/style under a name and reusing it, rather than pointing at a track each time. |
 | Follow-along lyrics | Suno scrolls the words with playback. The engine gives us no timing data, so this needs either forced alignment or an honest per-section estimate — not a fake one. |
 | Trim / crop | Cut a song down to a section and keep it as its own track. |
 | Export a playlist | Copy a playlist's audio into one folder, in order, with the covers. |

@@ -822,3 +822,24 @@ input[type="range"]::-moz-range-thumb {
   background: var(--accent);
   border: 0;
 }
+
+
+/* --- saved voices (personas) --------------------------------------------
+ *
+ * Listed under the picker they feed, so naming, choosing and forgetting a
+ * voice all live in one place instead of being scattered across the app.
+ */
+.persona-list { display: grid; gap: 6px; margin-top: 10px; }
+.persona-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.persona-name { font-weight: 600; }
+.persona-meta { color: var(--text-faint); font-size: 0.82rem; margin-right: auto; }
+.persona-row .btn-icon { padding: 5px 10px; font-size: 0.8rem; }
