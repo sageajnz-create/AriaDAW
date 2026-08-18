@@ -9,7 +9,9 @@ mod export;
 mod library;
 mod lyrics;
 mod models;
+mod png;
 mod trim;
+mod video;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -241,6 +243,39 @@ fn rename_track(state: State<'_, Arc<AppState>>, id: String, title: String) -> R
 #[tauri::command]
 fn delete_track(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
     state.library.lock().unwrap().delete(&id).map_err(|e| e.to_string())
+}
+
+/// Whether this computer can make a video at all, and why not when it can't.
+#[tauri::command]
+fn video_support() -> video::VideoSupport {
+    video::support()
+}
+
+/// Render a song as an MP4: its cover, held for the length of the audio.
+#[tauri::command]
+async fn export_video(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    dest: String,
+) -> Result<String, String> {
+    let st = Arc::clone(&state);
+    tauri::async_runtime::spawn_blocking(move || {
+        let track = st
+            .library
+            .lock()
+            .unwrap()
+            .get(&id)
+            .map_err(|e| e.to_string())?
+            .ok_or("That song isn't in your library anymore.")?;
+
+        let cover = video::cover_png(&track.id);
+        let dest = PathBuf::from(&dest);
+        video::write_mp4(std::path::Path::new(&track.audio_path), &cover, &dest)
+            .map_err(|e| e.to_string())?;
+        Ok(dest.display().to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Keep only a section of a song, as a new track.
@@ -1475,6 +1510,8 @@ pub fn run() {
             delete_track,
             trim_track,
             export_tracks,
+            video_support,
+            export_video,
             list_personas,
             create_persona,
             rename_persona,

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, formatDate, formatDuration, pickFolder, trackArtUrl } from "../api";
+import { api, formatDate, formatDuration, pickFolder, pickSaveFile, trackArtUrl } from "../api";
 import Derive from "./Derive";
 import type { Player } from "../player";
-import type { ExportReport, Playlist, Track } from "../types";
+import type { ExportReport, Playlist, Track, VideoSupport } from "../types";
 
 interface Props {
   tracks: Track[];
@@ -14,6 +14,8 @@ interface Props {
   onDeriveStarted: (jobId: string) => void;
   player: Player;
   onPersonaSaved: () => void;
+  /** Null until checked. Video needs ffmpeg, which is the one optional piece. */
+  videoSupport: VideoSupport | null;
 }
 
 /** "All songs" and "Favourites" are scopes too, so one control covers them all. */
@@ -22,7 +24,7 @@ type Sort = "order" | "newest" | "oldest" | "longest" | "title";
 
 export default function Library({
   tracks, playlists, onChanged, onPlaylistsChanged,
-  supportsStems, busy, onDeriveStarted, player, onPersonaSaved,
+  supportsStems, busy, onDeriveStarted, player, onPersonaSaved, videoSupport,
 }: Props) {
   const [openLyrics, setOpenLyrics] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -33,6 +35,23 @@ export default function Library({
   const [exporting, setExporting] = useState(false);
   const [exported, setExported] = useState<ExportReport | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
+  const [videoBusy, setVideoBusy] = useState<string | null>(null);
+  const [videoNote, setVideoNote] = useState<Record<string, string>>({});
+
+  async function saveVideo(t: Track) {
+    const dest = await pickSaveFile(`${t.title}.mp4`);
+    if (!dest) return;
+    setVideoBusy(t.id);
+    setVideoNote((n) => ({ ...n, [t.id]: "" }));
+    try {
+      const written = await api.exportVideo(t.id, dest);
+      setVideoNote((n) => ({ ...n, [t.id]: `Saved to ${written}` }));
+    } catch (e) {
+      setVideoNote((n) => ({ ...n, [t.id]: String(e) }));
+    } finally {
+      setVideoBusy(null);
+    }
+  }
   const [query, setQuery] = useState("");
   const [scope, setScope] = useState<Scope>({ kind: "all" });
   const [sort, setSort] = useState<Sort>("newest");
@@ -266,6 +285,12 @@ export default function Library({
           >
             {exporting ? "Copying…" : "Export…"}
           </button>
+
+          {videoSupport && !videoSupport.available && (
+            <p className="hint" style={{ flexBasis: "100%", margin: 0 }}>
+              {videoSupport.reason}
+            </p>
+          )}
         </div>
 
         {activePlaylist && (
@@ -500,6 +525,18 @@ export default function Library({
                       Save this voice
                     </button>
 
+                    {videoSupport?.available && (
+                      <button
+                        type="button"
+                        className="btn btn-icon"
+                        onClick={() => saveVideo(t)}
+                        disabled={t.missing || videoBusy !== null}
+                        title="An MP4 of the cover and the song, for posting"
+                      >
+                        {videoBusy === t.id ? "Making video…" : "Save as video"}
+                      </button>
+                    )}
+
                     {t.lyrics && (
                       <button
                         type="button"
@@ -571,6 +608,12 @@ export default function Library({
                       <button type="submit" className="btn">Create and add</button>
                     </form>
                   </div>
+                )}
+
+                {videoNote[t.id] && (
+                  <p className="hint" style={{ marginTop: 10 }} role="status">
+                    {videoNote[t.id]}
+                  </p>
                 )}
 
                 {savingVoice === t.id && (

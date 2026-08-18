@@ -6,7 +6,7 @@ import Setup from "./components/Setup";
 import { api, loadAudioBase, onEvent, openFolder, pickAudioFile } from "./api";
 import { usePlayer } from "./player";
 import { isDesktop } from "./preview";
-import type { EngineStatus, Persona, Playlist, Track } from "./types";
+import type { EngineStatus, Persona, Playlist, Track, VideoSupport } from "./types";
 
 type Tab = "create" | "library";
 
@@ -15,6 +15,9 @@ export default function App() {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [personas, setPersonas] = useState<Persona[]>([]);
+  // Checked once at launch: it shells out to ffmpeg, and the answer can't
+  // change while the app is open.
+  const [videoSupport, setVideoSupport] = useState<VideoSupport | null>(null);
   const [status, setStatus] = useState<EngineStatus | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
   const [largeText, setLargeText] = useState(false);
@@ -101,6 +104,7 @@ export default function App() {
       await refreshTracks();
       await refreshPlaylists();
       await refreshPersonas();
+      api.videoSupport().then(setVideoSupport).catch(() => {});
       setCanPlayAudio(await api.audioOutputAvailable());
       try {
         await api.startEngine();
@@ -299,6 +303,7 @@ export default function App() {
                 onDeriveStarted={() => setDeriving(true)}
                 player={player}
                 onPersonaSaved={refreshPersonas}
+                videoSupport={videoSupport}
               />
             </div>
           )}

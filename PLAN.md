@@ -307,12 +307,43 @@ Verified against real LAME output, not just synthetic frames: a WAV cut is
 byte-identical to the corresponding region of its source, and an MP3 cut lands
 within a millisecond of what ffprobe reports, at the same measured loudness.
 
-### Phase 8 — Remaining parity gaps
+### Phase 8 — Video export
+
+Cover art plus audio as an MP4, because that is the format every platform
+accepts when you want to post a song.
+
+This is the one feature with an outside dependency. Encoding H.264 means
+ffmpeg, and shipping a build of it is a different project — so video *detects*
+ffmpeg and hides itself when it isn't there, rather than making every user carry
+a dependency for something most will never open. Nothing else degrades without
+it.
+
+The cover is rasterised by Aria rather than handed over as SVG, because ffmpeg
+can only read SVG when built against librsvg, which distro and static builds
+routinely are not. That meant `art.rs` needed a second renderer — so the file
+was reorganised around a `Composition` that decides *what* to draw, leaving the
+SVG and raster paths to decide only *how*. The refactor was checked by
+regenerating 24 covers and diffing them against the previous build: byte
+identical, so nobody's existing artwork moved.
+
+Two fidelity bugs found by comparing against librsvg's rendering of the very
+same document, both worth recording because neither is guessable:
+
+- SVG filters default to `color-interpolation-filters: linearRGB`. Blurring the
+  colour fields in sRGB instead made every cover a uniform 24/255 too dark.
+- `feTurbulence` grain is a *blend toward* a turbulent grey, not an addition of
+  mean-zero noise. Modelled as the latter it read as heavy sensor grain.
+
+And one output bug: `-shortest` does not reliably cut a looped still. Measured
+against a 30.000s song it produced a 30.000s audio stream and a 32.300s video
+one — 2.3 seconds of silent freeze-frame. The length now comes from probing the
+audio and passing `-t`.
+
+### Phase 9 — Remaining parity gaps
 
 | Gap | Notes |
 |---|---|
 | Follow-along lyrics | Suno scrolls the words with playback. The engine gives us no timing data, so this needs either forced alignment or an honest per-section estimate — not a fake one. |
-| Video export | Suno's shareable MP4 is cover art plus audio. Needs ffmpeg, which is a real dependency decision, not a small one. |
 
 Deliberately **not** pursued: publishing, sharing feeds, and public profiles.
 Those need a server, and a server is the thing Aria exists not to have.

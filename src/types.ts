@@ -23,6 +23,12 @@ export interface Track {
   missing?: boolean;
 }
 
+/** Whether this computer can make a video, and why not when it can't. */
+export interface VideoSupport {
+  available: boolean;
+  reason: string | null;
+}
+
 /** What an export actually did. */
 export interface ExportReport {
   folder: string;

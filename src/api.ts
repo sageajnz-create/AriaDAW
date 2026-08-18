@@ -1,5 +1,5 @@
 import type {
-  EngineStatus, ExportReport, GenerateOptions, Persona, Playlist, Track,
+  EngineStatus, ExportReport, GenerateOptions, Persona, Playlist, Track, VideoSupport,
 } from "./types";
 import { isDesktop, previewArt, previewStatus, previewTracks } from "./preview";
 
@@ -145,6 +145,17 @@ export const api = {
   remakeLike: async (id: string, keepWords: boolean): Promise<string> => {
     if (!isDesktop) return `preview-remake-${Date.now()}`;
     return (await tauri()).invoke<string>("remake_like", { id, keepWords });
+  },
+
+  videoSupport: async (): Promise<VideoSupport> => {
+    if (!isDesktop) return { available: true, reason: null };
+    return (await tauri()).invoke<VideoSupport>("video_support");
+  },
+
+  /** Render a song as an MP4: its cover, held for the length of the audio. */
+  exportVideo: async (id: string, dest: string): Promise<string> => {
+    if (!isDesktop) return dest;
+    return (await tauri()).invoke<string>("export_video", { id, dest });
   },
 
   /** Keep only a section of a song, as a new track. Instant: no engine. */
@@ -328,6 +339,17 @@ export async function pickAudioFile(): Promise<string | null> {
   const picked = await open({
     multiple: false,
     filters: [{ name: "Audio", extensions: ["mp3", "wav", "flac", "ogg", "m4a", "opus"] }],
+  });
+  return typeof picked === "string" ? picked : null;
+}
+
+/** Ask where to write one file. Returns null if the user cancels. */
+export async function pickSaveFile(defaultName: string): Promise<string | null> {
+  if (!isDesktop) return `~/Videos/${defaultName}`;
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const picked = await save({
+    defaultPath: defaultName,
+    filters: [{ name: "Video", extensions: ["mp4"] }],
   });
   return typeof picked === "string" ? picked : null;
 }
