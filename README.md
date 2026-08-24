@@ -27,6 +27,7 @@ After the one-time model download, Aria works completely offline.
 - **Control the music** — style, BPM, key, duration, seed
 - **Rework what you made** — regenerate a section, extend a track, make a cover
 - **Split into stems** — vocals, drums, bass, other
+- **Follow the words** — lyrics scroll with the song while it plays
 - **Keep everything** — plain audio files in a folder you control
 
 ## Requirements

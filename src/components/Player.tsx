@@ -1,6 +1,8 @@
 import { formatDuration, trackArtUrl } from "../api";
 import { isDesktop } from "../preview";
 import type { Player } from "../player";
+import FollowAlong from "./FollowAlong";
+import { useState } from "react";
 
 interface Props {
   player: Player;
@@ -15,6 +17,11 @@ interface Props {
 export default function PlayerBar({ player }: Props) {
   const { current, playing, position, length, error } = player;
   const total = length || current?.duration || 0;
+  // Words stay open across songs once asked for — someone following along is
+  // following the queue, not one track.
+  const [wordsOpen, setWordsOpen] = useState(false);
+  const singable =
+    !!current && !!current.lyrics && current.lyrics.trim() !== "[Instrumental]";
 
   return (
     <div className={"player" + (current ? "" : " player-idle")}>
@@ -90,6 +97,17 @@ export default function PlayerBar({ player }: Props) {
             <button
               type="button"
               className="btn btn-icon"
+              onClick={() => setWordsOpen((v) => !v)}
+              aria-expanded={singable ? wordsOpen : undefined}
+              aria-controls="follow-along"
+              disabled={!singable}
+              title="Follow the words while it plays"
+            >
+              Words
+            </button>
+            <button
+              type="button"
+              className="btn btn-icon"
               onClick={player.toggleShuffle}
               aria-pressed={player.shuffle}
               title="Play in a random order"
@@ -128,6 +146,12 @@ export default function PlayerBar({ player }: Props) {
               ✕
             </button>
           </div>
+
+          {wordsOpen && singable && (
+            <div id="follow-along" className="player-follow">
+              <FollowAlong track={current} position={position} />
+            </div>
+          )}
         </>
       )}
 

@@ -339,11 +339,29 @@ against a 30.000s song it produced a 30.000s audio stream and a 32.300s video
 one — 2.3 seconds of silent freeze-frame. The length now comes from probing the
 audio and passing `-t`.
 
-### Phase 9 — Remaining parity gaps
+### Phase 9 — Follow-along lyrics ✅
 
-| Gap | Notes |
-|---|---|
-| Follow-along lyrics | Suno scrolls the words with playback. The engine gives us no timing data, so this needs either forced alignment or an honest per-section estimate — not a fake one. |
+Suno scrolls the words with playback; Aria now does too, from the Words button in
+the player bar.
+
+The engine returns words and audio but no alignment data, and the honest options
+were forced alignment or a structural estimate. Forced alignment means shipping
+a speech recognizer — another model to download, more VRAM, more failure modes —
+for a feature most people will glance at while singing along. So Aria estimates,
+from structure the lyrics already have:
+
+- Section markers (`[Verse 1]`, `[Chorus]`) cost no time; they are headings.
+- Instrumental sections consume time without words: an intro or outro is sized
+  at twice an average sung line, a solo or break at four times.
+- Sung lines divide what remains, weighted by word count — a longer line takes
+  longer to sing, on average and in expectation.
+
+The panel says plainly that timing is approximate: "the song's shape, not a
+stopwatch." Nothing announces per line — for a screen reader user that would be
+an interruption every few seconds for the whole song — so the scroller is a
+focusable region keyboard users can read at their own pace. The highlight moves
+instantly (`scrollIntoView` with `nearest`), which respects reduced-motion
+preferences by never animating in the first place.
 
 Deliberately **not** pursued: publishing, sharing feeds, and public profiles.
 Those need a server, and a server is the thing Aria exists not to have.

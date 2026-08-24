@@ -787,6 +787,55 @@ audio { width: 100%; margin-top: 13px; }
   font-size: 0.85rem;
 }
 
+/* --- follow-along lyrics --------------------------------------------------
+ *
+ * Opens as a full-width row inside the player bar, the same way errors do.
+ */
+.player-follow { flex-basis: 100%; }
+
+.follow-note {
+  margin: 0 0 8px;
+  color: var(--text-faint);
+  font-size: 0.8rem;
+}
+
+.follow-scroll {
+  max-height: 180px;
+  overflow-y: auto;
+  padding: 10px 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.follow-section {
+  margin: 10px 0 2px;
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.follow-scroll .follow-line:first-child + .follow-section,
+.follow-line:first-child { margin-top: 0; }
+/* A heading directly after the scroller's top edge still needs no gap. */
+.follow-section:first-child { margin-top: 0; }
+
+.follow-line {
+  margin: 2px 0;
+  color: var(--text-faint);
+  transition: color 120ms ease, font-weight 0s;
+}
+.follow-line.active {
+  color: var(--text);
+  font-weight: 620;
+}
+.follow-line.instrumental { font-style: italic; }
+
+@media (prefers-reduced-motion: reduce) {
+  .follow-line { transition: none; }
+}
+
 /* Range inputs are drawn entirely by the platform otherwise, which on a dark
    surface means a near-invisible grey track. */
 input[type="range"] {
