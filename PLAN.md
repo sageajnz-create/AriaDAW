@@ -363,6 +363,18 @@ focusable region keyboard users can read at their own pace. The highlight moves
 instantly (`scrollIntoView` with `nearest`), which respects reduced-motion
 preferences by never animating in the first place.
 
+### Phase 10 — Layering ✅
+
+`lego` had backend wiring from the start and no way in: the Derive row offered
+stems, extend, trim, cover, repaint and "more like this", but not the one
+operation Suno has no equivalent for. The Add-an-instrument panel closes that:
+pick what should join (any of the twelve track types), optionally say how it
+should be played, and Aria plays it over the song as it is — the original is
+never touched, and the result lands in the library under its own lineage.
+
+It sits behind the same gate as stems because both need the SFT model, and the
+panel says so up front rather than letting a minutes-long SFT job look stuck.
+
 Deliberately **not** pursued: publishing, sharing feeds, and public profiles.
 Those need a server, and a server is the thing Aria exists not to have.
 

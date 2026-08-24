@@ -26,6 +26,7 @@ After the one-time model download, Aria works completely offline.
 - **Write your own lyrics** with structure tags (`[verse]`, `[chorus]`, `[bridge]`)
 - **Control the music** — style, BPM, key, duration, seed
 - **Rework what you made** — regenerate a section, extend a track, make a cover
+- **Add an instrument** — a new part played over the song as it is
 - **Split into stems** — vocals, drums, bass, other
 - **Follow the words** — lyrics scroll with the song while it plays
 - **Keep everything** — plain audio files in a folder you control

@@ -5,7 +5,7 @@ import type { StemChoice, Track } from "../types";
 /** Things you can make from a song you already have.
  *  Suno charges for stem separation and section editing; here they're just
  *  part of the app. */
-type Panel = "stems" | "extend" | "cover" | "section" | "shorten" | "more" | null;
+type Panel = "stems" | "extend" | "cover" | "section" | "shorten" | "more" | "layer" | null;
 
 /** mm:ss for the section editor, where seconds matter. */
 function clock(seconds: number): string {
@@ -30,6 +30,8 @@ export default function Derive({
   const [panel, setPanel] = useState<Panel>(null);
   const [stems, setStems] = useState<StemChoice[]>([]);
   const [stem, setStem] = useState("vocals");
+  const [layerInst, setLayerInst] = useState("guitar");
+  const [layerStyle, setLayerStyle] = useState("");
   const [extendBy, setExtendBy] = useState(30);
   const [coverStyle, setCoverStyle] = useState("");
   const [secStart, setSecStart] = useState(0);
@@ -41,7 +43,7 @@ export default function Derive({
   const [trimError, setTrimError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (panel === "stems" && stems.length === 0) {
+    if ((panel === "stems" || panel === "layer") && stems.length === 0) {
       api.stemChoices().then(setStems).catch(() => {});
     }
   }, [panel, stems.length]);
@@ -85,6 +87,20 @@ export default function Derive({
           }
         >
           Separate parts
+        </button>
+        <button
+          type="button"
+          className="btn btn-icon"
+          onClick={() => setPanel(panel === "layer" ? null : "layer")}
+          aria-expanded={panel === "layer"}
+          disabled={busy || !supportsStems}
+          title={
+            supportsStems
+              ? "Play a new instrument on top of the song as it is"
+              : "Needs the detailed sound model"
+          }
+        >
+          Add an instrument
         </button>
         <button
           type="button"
@@ -336,6 +352,52 @@ export default function Derive({
             disabled={busy}
           >
             Separate it
+          </button>
+        </div>
+      )}
+
+      {panel === "layer" && (
+        <div className="derive-panel">
+          <div className="field">
+            <label htmlFor={`layer-${track.id}`}>What should join in?</label>
+            <select
+              id={`layer-${track.id}`}
+              value={layerInst}
+              onChange={(e) => setLayerInst(e.target.value)}
+              disabled={busy}
+            >
+              {stems.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="field">
+            <label htmlFor={`ls-${track.id}`}>How should it be played? (optional)</label>
+            <input
+              id={`ls-${track.id}`}
+              type="text"
+              value={layerStyle}
+              onChange={(e) => setLayerStyle(e.target.value)}
+              placeholder="a warm slide guitar, laid back behind the vocals"
+              disabled={busy}
+            />
+          </div>
+          <p className="hint">
+            Keeps everything you hear and plays the new part on top. The original
+            stays as it is. This one uses the detailed sound model, so it takes a
+            few minutes rather than seconds.
+          </p>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() =>
+              run({ kind: "add_layer", track: layerInst, caption: layerStyle.trim() || null })
+            }
+            disabled={busy}
+          >
+            Play it over the song
           </button>
         </div>
       )}
