@@ -403,4 +403,179 @@ mod tests {
         let buf = b"--ace-batch-boundary\r\nContent-Type: text/plain\r\n\r\nnope\r\n--ace-batch-boundary--";
         assert!(parse_multipart(buf).is_err());
     }
+
+    /// A real HTTP server on a real port, so the client's URLs, timeouts,
+    /// status handling and JSON shapes are exercised end to end — not just
+    /// the parsers. `handler` answers one request per call; the server serves
+    /// up to `max_requests` and then shuts down, so its port is released.
+    fn with_engine(
+        max_requests: usize,
+        handler: impl Fn(tiny_http::Request) + Send + 'static,
+    ) -> (
+        AceClient,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        std::thread::JoinHandle<()>,
+    ) {
+        let server = tiny_http::Server::http("127.0.0.1:0").unwrap();
+        let port = server.server_addr().to_ip().unwrap().port();
+        let served = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = served.clone();
+        let t = std::thread::spawn(move || {
+            for (i, req) in server.incoming_requests().enumerate() {
+                handler(req);
+                counter.store(i + 1, std::sync::atomic::Ordering::SeqCst);
+                if i + 1 >= max_requests {
+                    break; // drop server → release the port, end the thread
+                }
+            }
+        });
+        (
+            AceClient::new(format!("http://127.0.0.1:{port}")).unwrap(),
+            served,
+            t,
+        )
+    }
+
+    /// Wait until the test's request(s) have actually been answered, so a join
+    /// can never race a response that is still in flight.
+    fn wait_served(served: &std::sync::Arc<std::sync::atomic::AtomicUsize>, n: usize) {
+        for _ in 0..200 {
+            if served.load(std::sync::atomic::Ordering::SeqCst) >= n {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        panic!("engine stub never received {n} request(s)");
+    }
+
+    fn reply(mut req: tiny_http::Request, status: u16, body: &str) {
+        // Drain the request body first: an unanswered POST body can stall the
+        // exchange on some platforms.
+        std::io::copy(&mut *req.as_reader(), &mut std::io::sink()).ok();
+        let resp = tiny_http::Response::from_string(body).with_status_code(status);
+        let _ = req.respond(resp);
+    }
+
+    #[test]
+    fn submit_posts_json_and_reads_the_job_id() {
+        let (client, served, t) = with_engine(1, |mut req| {
+            let mut body = String::new();
+            req.as_reader().read_to_string(&mut body).unwrap();
+            assert!(
+                body.contains("\"task\""),
+                "engine should receive the request json, got {body}"
+            );
+            assert_eq!(req.url(), "/lm");
+            reply(req, 200, r#"{"id":"job-1"}"#);
+        });
+
+        let id = client
+            .submit_lm(&serde_json::json!({"task": "text2music", "prompt": "folk"}))
+            .unwrap();
+        assert_eq!(id, "job-1");
+        wait_served(&served, 1);
+        t.join().unwrap();
+    }
+
+    #[test]
+    fn a_rejected_job_reports_who_said_no() {
+        let (client, served, t) = with_engine(1, |req| reply(req, 400, "bad request"));
+        let err = client
+            .submit_synth(&serde_json::json!({}))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("synth"), "{err}");
+        wait_served(&served, 1);
+        t.join().unwrap();
+    }
+
+    #[test]
+    fn a_response_without_a_job_id_is_an_error_not_a_panic() {
+        let (client, served, t) = with_engine(1, |req| reply(req, 200, "{}"));
+        assert!(client.submit_lm(&serde_json::json!({})).is_err());
+        wait_served(&served, 1);
+        t.join().unwrap();
+    }
+
+    #[test]
+    fn poll_maps_every_status_word() {
+        for (word, want) in [
+            ("done", JobStatus::Done),
+            ("running", JobStatus::Running),
+            ("queued", JobStatus::Queued),
+            ("failed", JobStatus::Failed),
+            ("cancelled", JobStatus::Cancelled),
+        ] {
+            let (client, served, t) = with_engine(1, move |req| {
+                reply(req, 200, &format!(r#"{{"status":"{word}"}}"#))
+            });
+            assert_eq!(client.poll("j").unwrap(), want, "status word {word:?}");
+            wait_served(&served, 1);
+            t.join().unwrap();
+        }
+    }
+
+    #[test]
+    fn poll_treats_an_empty_body_as_a_dead_engine() {
+        let (client, served, t) = with_engine(1, |req| reply(req, 200, ""));
+        let err = client.poll("j").unwrap_err().to_string();
+        assert!(err.contains("stopped responding"), "{err}");
+        wait_served(&served, 1);
+        t.join().unwrap();
+    }
+
+    #[test]
+    fn poll_refuses_an_unknown_status_word_rather_than_guessing() {
+        let (client, served, t) = with_engine(1, |req| reply(req, 200, r#"{"status":"warp"}"#));
+        assert!(client.poll("j").is_err());
+        wait_served(&served, 1);
+        t.join().unwrap();
+    }
+
+    #[test]
+    fn lm_results_normalises_single_and_batch_shapes() {
+        // The batch shape is what the engine actually sends.
+        let (client, _served, t) = with_engine(1, |req| {
+            assert_eq!(req.url(), "/job?id=j1&result=1");
+            reply(req, 200, r#"[{"codes":[1]},{"codes":[2]}]"#);
+        });
+        assert_eq!(client.lm_results("j1").unwrap().len(), 2);
+        t.join().unwrap();
+
+        // A single object is wrapped so callers never branch.
+        let (client, _served, t) = with_engine(1, |req| reply(req, 200, r#"{"codes":[9]}"#));
+        assert_eq!(client.lm_results("j2").unwrap().len(), 1);
+        t.join().unwrap();
+
+        // An empty array is "the engine made nothing", which must be an error.
+        let (client, _served, t) = with_engine(1, |req| reply(req, 200, "[]"));
+        assert!(client.lm_results("j3").is_err());
+        t.join().unwrap();
+    }
+
+    #[test]
+    fn synth_result_splits_audio_from_latent() {
+        let mut body = Vec::new();
+        body.extend_from_slice(b"--ace-batch-boundary\r\nContent-Type: audio/mpeg\r\n\r\n");
+        let audio = vec![0xAAu8; 100];
+        body.extend_from_slice(&audio);
+        body.extend_from_slice(b"\r\n--ace-batch-boundary\r\nContent-Type: application/octet-stream; name=\"latent\"\r\n\r\n");
+        let latent = vec![0xBBu8; 80];
+        body.extend_from_slice(&latent);
+        body.extend_from_slice(b"\r\n--ace-batch-boundary--");
+
+        let (client, _served, t) = with_engine(1, move |req| {
+            let mut b = body.clone();
+            let mut resp = tiny_http::Response::from_data(std::mem::take(&mut b));
+            resp.add_header(
+                tiny_http::Header::from_bytes(&b"Content-Type"[..], &b"multipart/mixed"[..])
+                    .unwrap(),
+            );
+            let _ = req.respond(resp);
+        });
+        let out = client.synth_result("j").unwrap();
+        assert_eq!(out.audio, audio);
+        assert_eq!(out.latent.unwrap(), latent);
+        t.join().unwrap();
+    }
 }
