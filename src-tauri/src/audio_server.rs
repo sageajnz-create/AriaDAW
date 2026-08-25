@@ -72,17 +72,36 @@ fn header_value(request: &tiny_http::Request, name: &'static str) -> Option<Stri
 }
 
 enum Reply {
-    Full { path: PathBuf, len: u64, mime: &'static str },
+    Full {
+        path: PathBuf,
+        len: u64,
+        mime: &'static str,
+    },
     /// Generated on the spot rather than read from disk — cover art.
-    Inline { body: String, mime: &'static str },
-    Partial { path: PathBuf, start: u64, end: u64, total: u64, mime: &'static str },
+    Inline {
+        body: String,
+        mime: &'static str,
+    },
+    Partial {
+        path: PathBuf,
+        start: u64,
+        end: u64,
+        total: u64,
+        mime: &'static str,
+    },
     Denied(u16, String),
 }
 
 /// Tracks can be saved lossless, so the type has to follow the file rather than
 /// always claiming mp3 — a wav served as audio/mpeg won't play.
 fn mime_for(path: &std::path::Path) -> &'static str {
-    match path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
+    match path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "wav" => "audio/wav",
         "flac" => "audio/flac",
         "ogg" | "opus" => "audio/ogg",
@@ -120,7 +139,10 @@ fn handle(
         // copy beside the audio is what makes it the user's, not ours.
         let svg = crate::art::svg_for(&track.id);
         crate::art::save_beside(&track.audio_path, &svg);
-        return Reply::Inline { body: svg, mime: "image/svg+xml" };
+        return Reply::Inline {
+            body: svg,
+            mime: "image/svg+xml",
+        };
     }
     if kind != "track" {
         return Reply::Denied(404, "not a track url".into());
@@ -134,8 +156,18 @@ fn handle(
 
     let mime = mime_for(&path);
     match range.and_then(|r| parse_range(r, total)) {
-        Some((start, end)) => Reply::Partial { path, start, end, total, mime },
-        None => Reply::Full { path, len: total, mime },
+        Some((start, end)) => Reply::Partial {
+            path,
+            start,
+            end,
+            total,
+            mime,
+        },
+        None => Reply::Full {
+            path,
+            len: total,
+            mime,
+        },
     }
 }
 
@@ -164,16 +196,30 @@ fn respond(request: tiny_http::Request, reply: Reply) -> std::io::Result<()> {
         Reply::Full { path, len, mime } => {
             let audio = ctype(mime);
             let file = std::fs::File::open(&path)?;
-            let resp = Response::new(StatusCode(200), vec![audio, ranges], file, Some(len as usize), None);
+            let resp = Response::new(
+                StatusCode(200),
+                vec![audio, ranges],
+                file,
+                Some(len as usize),
+                None,
+            );
             request.respond(resp)
         }
         Reply::Inline { body, mime } => {
             // Deterministic for the life of the track, so the webview may keep it.
             let cache = Header::from_bytes(&b"Cache-Control"[..], &b"max-age=86400"[..]).unwrap();
-            let resp = Response::from_string(body).with_header(ctype(mime)).with_header(cache);
+            let resp = Response::from_string(body)
+                .with_header(ctype(mime))
+                .with_header(cache);
             request.respond(resp)
         }
-        Reply::Partial { path, start, end, total, mime } => {
+        Reply::Partial {
+            path,
+            start,
+            end,
+            total,
+            mime,
+        } => {
             let audio = ctype(mime);
             let mut file = std::fs::File::open(&path)?;
             file.seek(SeekFrom::Start(start))?;

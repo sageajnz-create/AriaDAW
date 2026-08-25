@@ -57,8 +57,20 @@ struct Bar {
 }
 
 enum Ring {
-    Full { r: f64, sw: f64, ink: Ink, op: f64 },
-    Arc { r: f64, sw: f64, ink: Ink, op: f64, start: f64, sweep: f64 },
+    Full {
+        r: f64,
+        sw: f64,
+        ink: Ink,
+        op: f64,
+    },
+    Arc {
+        r: f64,
+        sw: f64,
+        ink: Ink,
+        op: f64,
+        start: f64,
+        sweep: f64,
+    },
 }
 
 enum Motif {
@@ -93,9 +105,17 @@ impl Composition {
         let accent = (hue + rng.range(100.0, 200.0)) % 360.0;
 
         let deep = hsl(hue, rng.range(0.45, 0.7), rng.range(0.10, 0.17));
-        let mid = hsl((hue + 20.0) % 360.0, rng.range(0.5, 0.75), rng.range(0.22, 0.32));
+        let mid = hsl(
+            (hue + 20.0) % 360.0,
+            rng.range(0.5, 0.75),
+            rng.range(0.22, 0.32),
+        );
         let glow = hsl(accent, rng.range(0.6, 0.85), rng.range(0.55, 0.68));
-        let hilite = hsl((accent + 30.0) % 360.0, rng.range(0.55, 0.8), rng.range(0.62, 0.75));
+        let hilite = hsl(
+            (accent + 30.0) % 360.0,
+            rng.range(0.55, 0.8),
+            rng.range(0.62, 0.75),
+        );
 
         let angle = rng.range(0.0, 360.0).to_radians();
 
@@ -106,13 +126,23 @@ impl Composition {
             let cx = rng.range(80.0, SIZE - 80.0);
             let cy = rng.range(60.0, SIZE - 140.0);
             let r = rng.range(110.0, 240.0);
-            let ink = if i == 0 { Ink::Glow } else if i == 1 { Ink::Hilite } else { Ink::Mid };
+            let ink = if i == 0 {
+                Ink::Glow
+            } else if i == 1 {
+                Ink::Hilite
+            } else {
+                Ink::Mid
+            };
             let op = rng.range(0.35, 0.7);
             blobs.push(Blob { cx, cy, r, ink, op });
         }
 
         // Two motifs, so a library of covers doesn't look stamped from one mould.
-        let motif = if h & 1 == 0 { bars(&mut rng) } else { rings(&mut rng) };
+        let motif = if h & 1 == 0 {
+            bars(&mut rng)
+        } else {
+            rings(&mut rng)
+        };
 
         Composition {
             tag: format!("{:x}", h & 0xffff_ffff),
@@ -152,7 +182,15 @@ fn bars(rng: &mut Rng) -> Motif {
         let h = (rng.range(0.15, 1.0) * 0.55 + arc * 0.45) * 250.0 + 18.0;
         let ink = if i % 3 == 0 { Ink::Glow } else { Ink::Hilite };
         let op = rng.range(0.55, 1.0);
-        out.push(Bar { x, y: base - h, w, h, radius: (w / 2.0).min(9.0), ink, op });
+        out.push(Bar {
+            x,
+            y: base - h,
+            w,
+            h,
+            radius: (w / 2.0).min(9.0),
+            ink,
+            op,
+        });
     }
     Motif::Bars(out)
 }
@@ -173,7 +211,14 @@ fn rings(rng: &mut Rng) -> Motif {
         } else {
             let start = rng.range(0.0, std::f64::consts::TAU);
             let sweep = rng.range(1.2, 5.0);
-            out.push(Ring::Arc { r, sw, ink, op, start, sweep });
+            out.push(Ring::Arc {
+                r,
+                sw,
+                ink,
+                op,
+                start,
+                sweep,
+            });
         }
         r += rng.range(22.0, 52.0);
     }
@@ -225,7 +270,11 @@ pub fn svg_for(id: &str) -> String {
     for b in &c.blobs {
         svg.push_str(&format!(
             r#"<circle cx="{cx:.0}" cy="{cy:.0}" r="{r:.0}" fill="{fill}" opacity="{op:.2}"/>"#,
-            cx = b.cx, cy = b.cy, r = b.r, fill = hex(c.ink(b.ink)), op = b.op,
+            cx = b.cx,
+            cy = b.cy,
+            r = b.r,
+            fill = hex(c.ink(b.ink)),
+            op = b.op,
         ));
     }
     svg.push_str("</g>");
@@ -312,8 +361,14 @@ pub fn rgb_for(id: &str, size: u32) -> Vec<u8> {
     for b in &c.blobs {
         let ink = c.ink(b.ink);
         let (cx, cy, r) = (b.cx * scale, b.cy * scale, b.r * scale);
-        let (x0, x1) = ((cx - r).floor().max(0.0) as usize, (cx + r).ceil().min(n as f64) as usize);
-        let (y0, y1) = ((cy - r).floor().max(0.0) as usize, (cy + r).ceil().min(n as f64) as usize);
+        let (x0, x1) = (
+            (cx - r).floor().max(0.0) as usize,
+            (cx + r).ceil().min(n as f64) as usize,
+        );
+        let (y0, y1) = (
+            (cy - r).floor().max(0.0) as usize,
+            (cy + r).ceil().min(n as f64) as usize,
+        );
         for y in y0..y1 {
             for x in x0..x1 {
                 let d = ((x as f64 + 0.5 - cx).powi(2) + (y as f64 + 0.5 - cy).powi(2)).sqrt();
@@ -352,9 +407,15 @@ pub fn rgb_for(id: &str, size: u32) -> Vec<u8> {
             for b in list {
                 let ink = c.ink(b.ink);
                 paint_round_rect(
-                    &mut buf, n,
-                    b.x * scale, b.y * scale, b.w * scale, b.h * scale, b.radius * scale,
-                    ink, b.op as f32 * 0.92,
+                    &mut buf,
+                    n,
+                    b.x * scale,
+                    b.y * scale,
+                    b.w * scale,
+                    b.h * scale,
+                    b.radius * scale,
+                    ink,
+                    b.op as f32 * 0.92,
                 );
             }
         }
@@ -362,11 +423,26 @@ pub fn rgb_for(id: &str, size: u32) -> Vec<u8> {
             for ring in rings {
                 let (r, sw, ink, op, start, sweep) = match ring {
                     Ring::Full { r, sw, ink, op } => (r, sw, ink, op, 0.0, std::f64::consts::TAU),
-                    Ring::Arc { r, sw, ink, op, start, sweep } => (r, sw, ink, op, *start, *sweep),
+                    Ring::Arc {
+                        r,
+                        sw,
+                        ink,
+                        op,
+                        start,
+                        sweep,
+                    } => (r, sw, ink, op, *start, *sweep),
                 };
                 paint_arc(
-                    &mut buf, n, cx * scale, cy * scale, r * scale, sw * scale,
-                    start, sweep, c.ink(*ink), *op as f32,
+                    &mut buf,
+                    n,
+                    cx * scale,
+                    cy * scale,
+                    r * scale,
+                    sw * scale,
+                    start,
+                    sweep,
+                    c.ink(*ink),
+                    *op as f32,
                 );
             }
         }
@@ -377,7 +453,8 @@ pub fn rgb_for(id: &str, size: u32) -> Vec<u8> {
     let mut noise = Rng::new(c.grain_seed | 0x9e37_79b9);
     for y in 0..n {
         for x in 0..n {
-            let d = ((x as f64 + 0.5 - half).powi(2) + (y as f64 + 0.5 - half).powi(2)).sqrt() / half;
+            let d =
+                ((x as f64 + 0.5 - half).powi(2) + (y as f64 + 0.5 - half).powi(2)).sqrt() / half;
             let v = (((d - 0.55) / 0.45).clamp(0.0, 1.0) * 0.5) as f32;
             // Grain is a *blend toward* a grey, not an addition of one.
             // feTurbulence emits a turbulent alpha alongside the colour, so the
@@ -405,13 +482,21 @@ pub fn png_for(id: &str, size: u32) -> Vec<u8> {
 /// sRGB transfer function, in both directions, on 0..255 values.
 fn to_linear(v: f32) -> f32 {
     let c = (v / 255.0).clamp(0.0, 1.0);
-    let l = if c <= 0.04045 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+    let l = if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    };
     l * 255.0
 }
 
 fn to_srgb(v: f32) -> f32 {
     let l = (v / 255.0).clamp(0.0, 1.0);
-    let c = if l <= 0.0031308 { l * 12.92 } else { 1.055 * l.powf(1.0 / 2.4) - 0.055 };
+    let c = if l <= 0.0031308 {
+        l * 12.92
+    } else {
+        1.055 * l.powf(1.0 / 2.4) - 0.055
+    };
     c * 255.0
 }
 
@@ -437,8 +522,13 @@ fn blur_rgb(buf: &mut [f32], n: usize, radius: usize) {
 
 /// One box pass along a line of pixels chosen by `index`.
 fn running_box(
-    src: &[f32], dst: &mut [f32], n: usize, radius: usize, ch: usize,
-    index: impl Fn(usize) -> usize, len: usize,
+    src: &[f32],
+    dst: &mut [f32],
+    _n: usize,
+    radius: usize,
+    ch: usize,
+    index: impl Fn(usize) -> usize,
+    len: usize,
 ) {
     let mut sum = 0f32;
     let mut count = 0f32;
@@ -451,7 +541,7 @@ fn running_box(
             sum += src[index(i + radius) * 3 + ch];
             count += 1.0;
         }
-        if i >= radius + 1 {
+        if i > radius {
             sum -= src[index(i - radius - 1) * 3 + ch];
             count -= 1.0;
         }
@@ -475,7 +565,7 @@ fn blur_a(buf: &mut [f32], n: usize, radius: usize) {
                 sum += src[index(i + radius)];
                 count += 1.0;
             }
-            if i >= radius + 1 {
+            if i > radius {
                 sum -= src[index(i - radius - 1)];
                 count -= 1.0;
             }
@@ -510,12 +600,27 @@ fn coverage(d: f64) -> f32 {
     (0.5 - d).clamp(0.0, 1.0) as f32
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_round_rect(
-    buf: &mut [f32], n: usize, x: f64, y: f64, w: f64, h: f64, r: f64, ink: Rgb, op: f32,
+    buf: &mut [f32],
+    n: usize,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    r: f64,
+    ink: Rgb,
+    op: f32,
 ) {
     let r = r.min(w / 2.0).min(h / 2.0);
-    let (x0, x1) = ((x - 1.0).floor().max(0.0) as usize, (x + w + 1.0).ceil().min(n as f64) as usize);
-    let (y0, y1) = ((y - 1.0).floor().max(0.0) as usize, (y + h + 1.0).ceil().min(n as f64) as usize);
+    let (x0, x1) = (
+        (x - 1.0).floor().max(0.0) as usize,
+        (x + w + 1.0).ceil().min(n as f64) as usize,
+    );
+    let (y0, y1) = (
+        (y - 1.0).floor().max(0.0) as usize,
+        (y + h + 1.0).ceil().min(n as f64) as usize,
+    );
     for py in y0..y1 {
         for px in x0..x1 {
             let (fx, fy) = (px as f64 + 0.5, py as f64 + 0.5);
@@ -536,9 +641,18 @@ fn paint_round_rect(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn paint_arc(
-    buf: &mut [f32], n: usize, cx: f64, cy: f64, r: f64, sw: f64,
-    start: f64, sweep: f64, ink: Rgb, op: f32,
+    buf: &mut [f32],
+    n: usize,
+    cx: f64,
+    cy: f64,
+    r: f64,
+    sw: f64,
+    start: f64,
+    sweep: f64,
+    ink: Rgb,
+    op: f32,
 ) {
     let half = sw / 2.0;
     let (x0, x1) = (
@@ -727,7 +841,10 @@ mod tests {
         // a motif has to span a real range of values.
         let lo = *rgb.iter().min().unwrap();
         let hi = *rgb.iter().max().unwrap();
-        assert!(hi as i32 - lo as i32 > 40, "range {lo}..{hi} is too flat to be art");
+        assert!(
+            hi as i32 - lo as i32 > 40,
+            "range {lo}..{hi} is too flat to be art"
+        );
     }
 
     #[test]

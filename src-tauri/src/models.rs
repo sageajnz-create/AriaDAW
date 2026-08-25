@@ -10,7 +10,7 @@
 //! find that out; we detect VRAM and pick.
 
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -48,11 +48,15 @@ impl Tier {
     /// What a person actually needs to know to choose.
     pub fn description(self) -> &'static str {
         match self {
-            Tier::Light => "Works on almost any computer, including without a graphics card. \
-                            Songs take longer and the words are simpler.",
+            Tier::Light => {
+                "Works on almost any computer, including without a graphics card. \
+                            Songs take longer and the words are simpler."
+            }
             Tier::Standard => "A good balance. Needs a graphics card with about 6 GB.",
-            Tier::Best => "The best words and the fullest sound. Needs a graphics card with \
-                           8 GB or more.",
+            Tier::Best => {
+                "The best words and the fullest sound. Needs a graphics card with \
+                           8 GB or more."
+            }
         }
     }
 
@@ -64,7 +68,11 @@ impl Tier {
         };
         // The VAE is always full precision: it's small and quality-critical.
         let vae = mk("vae-BF16.gguf", 338_000_000, "decoder");
-        let enc = mk("Qwen3-Embedding-0.6B-Q8_0.gguf", 784_000_000, "text encoder");
+        let enc = mk(
+            "Qwen3-Embedding-0.6B-Q8_0.gguf",
+            784_000_000,
+            "text encoder",
+        );
         match self {
             Tier::Light => vec![
                 vae,
@@ -77,14 +85,22 @@ impl Tier {
                 enc,
                 mk("acestep-5Hz-lm-1.7B-Q8_0.gguf", 2_040_000_000, "songwriter"),
                 mk("acestep-v15-turbo-Q8_0.gguf", 2_680_000_000, "sound model"),
-                mk("acestep-v15-sft-Q8_0.gguf", 2_680_000_000, "detailed sound model"),
+                mk(
+                    "acestep-v15-sft-Q8_0.gguf",
+                    2_680_000_000,
+                    "detailed sound model",
+                ),
             ],
             Tier::Best => vec![
                 vae,
                 enc,
                 mk("acestep-5Hz-lm-4B-Q8_0.gguf", 4_680_000_000, "songwriter"),
                 mk("acestep-v15-turbo-Q8_0.gguf", 2_680_000_000, "sound model"),
-                mk("acestep-v15-sft-Q8_0.gguf", 2_680_000_000, "detailed sound model"),
+                mk(
+                    "acestep-v15-sft-Q8_0.gguf",
+                    2_680_000_000,
+                    "detailed sound model",
+                ),
             ],
         }
     }
@@ -150,9 +166,7 @@ pub fn download_tier(
     let files = tier.files();
     let count = files.len();
 
-    let client = reqwest::blocking::Client::builder()
-        .timeout(None)
-        .build()?;
+    let client = reqwest::blocking::Client::builder().timeout(None).build()?;
 
     for (index, file) in files.iter().enumerate() {
         let dest = dir.join(&file.name);
@@ -175,9 +189,15 @@ pub fn download_tier(
         if have > 0 {
             req = req.header(reqwest::header::RANGE, format!("bytes={have}-"));
         }
-        let mut resp = req.send().with_context(|| format!("downloading {}", file.name))?;
+        let mut resp = req
+            .send()
+            .with_context(|| format!("downloading {}", file.name))?;
         if !resp.status().is_success() {
-            return Err(anyhow!("could not download {} ({})", file.name, resp.status()));
+            return Err(anyhow!(
+                "could not download {} ({})",
+                file.name,
+                resp.status()
+            ));
         }
 
         let total = resp
@@ -272,7 +292,7 @@ fn verify_gguf(path: &Path) -> Result<()> {
 }
 
 /// Which files a tier is still missing.
-pub fn missing_files(dir: &PathBuf, tier: Tier) -> Vec<ModelFile> {
+pub fn missing_files(dir: &std::path::Path, tier: Tier) -> Vec<ModelFile> {
     tier.files()
         .into_iter()
         .filter(|f| {
@@ -312,6 +332,9 @@ mod tests {
         // extract/lego/complete require the SFT model; the Light tier can't do
         // them and the UI must not offer them there.
         assert!(!Tier::Light.files().iter().any(|f| f.name.contains("sft")));
-        assert!(Tier::Standard.files().iter().any(|f| f.name.contains("sft")));
+        assert!(Tier::Standard
+            .files()
+            .iter()
+            .any(|f| f.name.contains("sft")));
     }
 }

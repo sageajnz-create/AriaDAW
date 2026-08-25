@@ -62,7 +62,10 @@ pub fn support() -> VideoSupport {
             ),
         };
     }
-    VideoSupport { available: true, reason: None }
+    VideoSupport {
+        available: true,
+        reason: None,
+    }
 }
 
 fn run_ok(args: &[&str]) -> Option<String> {
@@ -78,11 +81,22 @@ fn run_ok(args: &[&str]) -> Option<String> {
 /// note or leave silence hanging on the end.
 fn probe_seconds(audio: &Path) -> Option<f64> {
     let out = Command::new("ffprobe")
-        .args(["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0"])
+        .args([
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "csv=p=0",
+        ])
         .arg(audio)
         .output()
         .ok()?;
-    String::from_utf8_lossy(&out.stdout).trim().parse::<f64>().ok().filter(|d| *d > 0.0)
+    String::from_utf8_lossy(&out.stdout)
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|d| *d > 0.0)
 }
 
 /// Write an MP4 of `audio` over `cover_png`.
@@ -104,8 +118,10 @@ pub fn write_mp4(audio: &Path, cover_png: &[u8], dest: &Path) -> Result<()> {
         // fps and duplicated up to the output rate, which is ~15x less PNG
         // decoding than looping at 30.
         .args(["-loop", "1", "-framerate", "2"])
-        .arg("-i").arg(&still)
-        .arg("-i").arg(audio);
+        .arg("-i")
+        .arg(&still)
+        .arg("-i")
+        .arg(audio);
 
     // `-shortest` alone does not cut a looped image reliably: measured against
     // a 30.000s song it produced a 30.000s audio stream and a *32.300s* video
@@ -116,7 +132,16 @@ pub fn write_mp4(audio: &Path, cover_png: &[u8], dest: &Path) -> Result<()> {
     }
 
     let result = cmd
-        .args(["-c:v", "libx264", "-tune", "stillimage", "-preset", "medium", "-crf", "20"])
+        .args([
+            "-c:v",
+            "libx264",
+            "-tune",
+            "stillimage",
+            "-preset",
+            "medium",
+            "-crf",
+            "20",
+        ])
         .args(["-r", &FPS.to_string()])
         // yuv420p is the pixel format every player and platform accepts; x264's
         // default 4:4:4 silently fails to play in QuickTime and most browsers.

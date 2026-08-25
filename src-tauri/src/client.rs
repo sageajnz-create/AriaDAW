@@ -23,8 +23,12 @@ pub enum JobStatus {
 }
 
 impl JobStatus {
+    #[allow(dead_code)]
     pub fn is_terminal(self) -> bool {
-        matches!(self, JobStatus::Done | JobStatus::Failed | JobStatus::Cancelled)
+        matches!(
+            self,
+            JobStatus::Done | JobStatus::Failed | JobStatus::Cancelled
+        )
     }
 }
 
@@ -62,6 +66,7 @@ impl AceClient {
         })
     }
 
+    #[allow(dead_code)]
     pub fn health(&self) -> bool {
         self.http
             .get(format!("{}/health", self.base))
@@ -72,6 +77,7 @@ impl AceClient {
     }
 
     /// Models the engine can see, plus its default parameters.
+    #[allow(dead_code)]
     pub fn props(&self) -> Result<Value> {
         Ok(self
             .http
@@ -88,7 +94,10 @@ impl AceClient {
             .send()
             .with_context(|| format!("submitting {endpoint} job"))?;
         if !resp.status().is_success() {
-            return Err(anyhow!("{endpoint} rejected the request: {}", resp.status()));
+            return Err(anyhow!(
+                "{endpoint} rejected the request: {}",
+                resp.status()
+            ));
         }
         let v: Value = resp.json()?;
         v.get("id")
@@ -120,7 +129,12 @@ impl AceClient {
                 .mime_str("application/json")?,
         );
 
-        let SynthSources { audio, latent, ref_audio, ref_latent } = sources;
+        let SynthSources {
+            audio,
+            latent,
+            ref_audio,
+            ref_latent,
+        } = sources;
 
         // A source is only required when the task transforms existing audio; a
         // plain generation with a voice reference has none.
@@ -136,7 +150,9 @@ impl AceClient {
             (None, Some(a)) => {
                 form = form.part(
                     "audio",
-                    Part::bytes(a).file_name("source.mp3").mime_str("audio/mpeg")?,
+                    Part::bytes(a)
+                        .file_name("source.mp3")
+                        .mime_str("audio/mpeg")?,
                 )
             }
             (None, None) => {}
@@ -154,7 +170,9 @@ impl AceClient {
             (None, Some(a)) => {
                 form = form.part(
                     "ref_audio",
-                    Part::bytes(a).file_name("voice.mp3").mime_str("audio/mpeg")?,
+                    Part::bytes(a)
+                        .file_name("voice.mp3")
+                        .mime_str("audio/mpeg")?,
                 )
             }
             (None, None) => {}
@@ -167,7 +185,10 @@ impl AceClient {
             .send()
             .context("submitting synth job with source audio")?;
         if !resp.status().is_success() {
-            return Err(anyhow!("the engine rejected the request: {}", resp.status()));
+            return Err(anyhow!(
+                "the engine rejected the request: {}",
+                resp.status()
+            ));
         }
         let v: Value = resp.json()?;
         v.get("id")
@@ -247,7 +268,10 @@ impl AceClient {
             .send()
             .context("submitting understand job")?;
         if !resp.status().is_success() {
-            return Err(anyhow!("the engine could not read that file: {}", resp.status()));
+            return Err(anyhow!(
+                "the engine could not read that file: {}",
+                resp.status()
+            ));
         }
         let v: Value = resp.json()?;
         v.get("id")
@@ -268,7 +292,9 @@ impl AceClient {
         let mut json_part: Option<Value> = None;
         let mut latent: Option<Vec<u8>> = None;
         for part in split_on(&bytes, BOUNDARY) {
-            let Some(hdr_end) = find(part, b"\r\n\r\n") else { continue };
+            let Some(hdr_end) = find(part, b"\r\n\r\n") else {
+                continue;
+            };
             let headers = String::from_utf8_lossy(&part[..hdr_end]).to_ascii_lowercase();
             let mut body = &part[hdr_end + 4..];
             if body.ends_with(b"\r\n") {
@@ -293,6 +319,7 @@ impl AceClient {
         ))
     }
 
+    #[allow(dead_code)]
     pub fn cancel(&self, id: &str) -> Result<()> {
         let _ = self
             .http
@@ -308,7 +335,9 @@ fn parse_multipart(data: &[u8]) -> Result<SynthOutput> {
     let mut latent = None;
 
     for part in split_on(data, BOUNDARY) {
-        let Some(hdr_end) = find(part, b"\r\n\r\n") else { continue };
+        let Some(hdr_end) = find(part, b"\r\n\r\n") else {
+            continue;
+        };
         let headers = String::from_utf8_lossy(&part[..hdr_end]).to_ascii_lowercase();
         let mut body = &part[hdr_end + 4..];
         // Trim the CRLF the sender puts before the next boundary.

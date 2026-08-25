@@ -175,9 +175,7 @@ impl Library {
         // that already exists, so new columns have to be added explicitly.
         // Adding a column that is already there is not an error worth failing
         // startup over — losing someone's library to a schema tweak would be.
-        for stmt in ["ALTER TABLE tracks ADD COLUMN lyricist TEXT"] {
-            let _ = conn.execute(stmt, []);
-        }
+        let _ = conn.execute("ALTER TABLE tracks ADD COLUMN lyricist TEXT", []);
 
         Ok(Self {
             conn,
@@ -194,10 +192,25 @@ impl Library {
                 lyricist)
                VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19)"#,
             params![
-                t.id, t.title, t.prompt, t.caption, t.lyrics, t.bpm, t.keyscale,
-                t.timesignature, t.vocal_language, t.duration, t.seed, t.model,
-                t.audio_path, t.latent_path, t.created_at, t.parent_id, t.operation,
-                t.favorite as i32, t.lyricist
+                t.id,
+                t.title,
+                t.prompt,
+                t.caption,
+                t.lyrics,
+                t.bpm,
+                t.keyscale,
+                t.timesignature,
+                t.vocal_language,
+                t.duration,
+                t.seed,
+                t.model,
+                t.audio_path,
+                t.latent_path,
+                t.created_at,
+                t.parent_id,
+                t.operation,
+                t.favorite as i32,
+                t.lyricist
             ],
         )?;
         Ok(())
@@ -226,14 +239,18 @@ impl Library {
     }
 
     pub fn set_favorite(&self, id: &str, fav: bool) -> Result<()> {
-        self.conn
-            .execute("UPDATE tracks SET favorite = ?2 WHERE id = ?1", params![id, fav as i32])?;
+        self.conn.execute(
+            "UPDATE tracks SET favorite = ?2 WHERE id = ?1",
+            params![id, fav as i32],
+        )?;
         Ok(())
     }
 
     pub fn rename(&self, id: &str, title: &str) -> Result<()> {
-        self.conn
-            .execute("UPDATE tracks SET title = ?2 WHERE id = ?1", params![id, title])?;
+        self.conn.execute(
+            "UPDATE tracks SET title = ?2 WHERE id = ?1",
+            params![id, title],
+        )?;
         Ok(())
     }
 
@@ -247,7 +264,8 @@ impl Library {
                 let _ = std::fs::remove_file(l);
             }
         }
-        self.conn.execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM tracks WHERE id = ?1", params![id])?;
         Ok(())
     }
 
@@ -259,7 +277,11 @@ impl Library {
             .prepare("SELECT id,name,created_at FROM playlists ORDER BY created_at")?;
         let heads = stmt
             .query_map([], |r| {
-                Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, i64>(2)?,
+                ))
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
@@ -272,7 +294,12 @@ impl Library {
                 let track_ids = members
                     .query_map([&id], |r| r.get::<_, String>(0))?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
-                Ok(Playlist { id, name, created_at, track_ids })
+                Ok(Playlist {
+                    id,
+                    name,
+                    created_at,
+                    track_ids,
+                })
             })
             .collect()
     }
@@ -287,19 +314,27 @@ impl Library {
             "INSERT INTO playlists (id,name,created_at) VALUES (?1,?2,?3)",
             params![id, name, created_at],
         )?;
-        Ok(Playlist { id, name: name.to_string(), created_at, track_ids: Vec::new() })
+        Ok(Playlist {
+            id,
+            name: name.to_string(),
+            created_at,
+            track_ids: Vec::new(),
+        })
     }
 
     pub fn rename_playlist(&self, id: &str, name: &str) -> Result<()> {
-        self.conn
-            .execute("UPDATE playlists SET name = ?2 WHERE id = ?1", params![id, name])?;
+        self.conn.execute(
+            "UPDATE playlists SET name = ?2 WHERE id = ?1",
+            params![id, name],
+        )?;
         Ok(())
     }
 
     /// Removes the playlist only. The songs in it are untouched — a playlist is
     /// a view of the library, never a container that owns what it lists.
     pub fn delete_playlist(&self, id: &str) -> Result<()> {
-        self.conn.execute("DELETE FROM playlists WHERE id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM playlists WHERE id = ?1", params![id])?;
         Ok(())
     }
 
@@ -361,7 +396,9 @@ impl Library {
             .ok();
 
         // Already at the end it was asked to move towards.
-        let Some((other_id, there)) = neighbour else { return Ok(()) };
+        let Some((other_id, there)) = neighbour else {
+            return Ok(());
+        };
 
         self.conn.execute(
             "UPDATE playlist_tracks SET position = ?3 WHERE playlist_id = ?1 AND track_id = ?2",
@@ -425,7 +462,10 @@ impl Library {
         let ext = if voice_is_latent {
             "latent".to_string()
         } else {
-            from.extension().and_then(|e| e.to_str()).unwrap_or("mp3").to_string()
+            from.extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("mp3")
+                .to_string()
         };
         let voice_path = self.personas_dir.join(format!("{id}.{ext}"));
         std::fs::copy(&from, &voice_path)
@@ -452,17 +492,26 @@ impl Library {
               source_track_id,created_at)
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
             params![
-                persona.id, persona.name, persona.caption, persona.bpm, persona.keyscale,
-                persona.vocal_language, persona.voice_path, persona.voice_is_latent as i32,
-                persona.source_track_id, persona.created_at
+                persona.id,
+                persona.name,
+                persona.caption,
+                persona.bpm,
+                persona.keyscale,
+                persona.vocal_language,
+                persona.voice_path,
+                persona.voice_is_latent as i32,
+                persona.source_track_id,
+                persona.created_at
             ],
         )?;
         Ok(persona)
     }
 
     pub fn rename_persona(&self, id: &str, name: &str) -> Result<()> {
-        self.conn
-            .execute("UPDATE personas SET name = ?2 WHERE id = ?1", params![id, name])?;
+        self.conn.execute(
+            "UPDATE personas SET name = ?2 WHERE id = ?1",
+            params![id, name],
+        )?;
         Ok(())
     }
 
@@ -472,10 +521,12 @@ impl Library {
         if let Some(p) = self.persona(id)? {
             let _ = std::fs::remove_file(&p.voice_path);
         }
-        self.conn.execute("DELETE FROM personas WHERE id = ?1", params![id])?;
+        self.conn
+            .execute("DELETE FROM personas WHERE id = ?1", params![id])?;
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn count(&self) -> Result<i64> {
         Ok(self
             .conn

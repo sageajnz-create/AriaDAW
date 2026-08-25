@@ -12,7 +12,11 @@
 
 /// Encode 8-bit RGB into a PNG. `rgb` must be `width * height * 3` bytes.
 pub fn encode_rgb(width: u32, height: u32, rgb: &[u8]) -> Vec<u8> {
-    assert_eq!(rgb.len(), width as usize * height as usize * 3, "rgb size mismatch");
+    assert_eq!(
+        rgb.len(),
+        width as usize * height as usize * 3,
+        "rgb size mismatch"
+    );
 
     let mut out = Vec::with_capacity(rgb.len() + 4096);
     out.extend_from_slice(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -84,7 +88,11 @@ impl Crc {
         for &b in bytes {
             let mut c = (self.0 ^ b as u32) & 0xff;
             for _ in 0..8 {
-                c = if c & 1 != 0 { 0xedb8_8320 ^ (c >> 1) } else { c >> 1 };
+                c = if c & 1 != 0 {
+                    0xedb8_8320 ^ (c >> 1)
+                } else {
+                    c >> 1
+                };
             }
             self.0 = c ^ (self.0 >> 8);
         }
@@ -103,7 +111,10 @@ mod tests {
         let rgb = vec![7u8; 4 * 3 * 3];
         let png = encode_rgb(4, 3, &rgb);
 
-        assert_eq!(&png[0..8], &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]);
+        assert_eq!(
+            &png[0..8],
+            &[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]
+        );
         // IHDR length, then the type, then the dimensions we asked for.
         assert_eq!(&png[8..12], &13u32.to_be_bytes());
         assert_eq!(&png[12..16], b"IHDR");

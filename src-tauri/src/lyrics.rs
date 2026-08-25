@@ -129,7 +129,11 @@ impl LyricWriter {
             return Err(anyhow!("style expansion too short to be useful"));
         }
         // Keep the user's own words in front, so the request is never buried.
-        Ok(format!("{}. {}", style.trim_end_matches(['.', ' ']), cleaned.trim()))
+        Ok(format!(
+            "{}. {}",
+            style.trim_end_matches(['.', ' ']),
+            cleaned.trim()
+        ))
     }
 
     /// Write lyrics for a song. `language` is a human-readable name ("English").
@@ -356,15 +360,21 @@ fn is_filler(line: &str) -> bool {
     // and that exact form is what the engine actually produced.
     let cleaned: String = line
         .chars()
-        .map(|c| if c.is_alphabetic() { c.to_ascii_lowercase() } else { ' ' })
+        .map(|c| {
+            if c.is_alphabetic() {
+                c.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
         .collect();
     let words: Vec<&str> = cleaned.split_whitespace().collect();
     if words.is_empty() {
         return true;
     }
     const FILLER: &[&str] = &[
-        "oh", "ooh", "ah", "aah", "yeah", "na", "la", "da", "hmm", "mmm", "woo",
-        "hey", "ay", "uh", "wah", "ooo", "mm", "ha",
+        "oh", "ooh", "ah", "aah", "yeah", "na", "la", "da", "hmm", "mmm", "woo", "hey", "ay", "uh",
+        "wah", "ooo", "mm", "ha",
     ];
     words.iter().all(|w| FILLER.contains(w))
 }
@@ -419,11 +429,18 @@ mod tests {
                     Gouda gold in farming fields\nWe carved out our own space\n\
                     Feet on the ground, stories told\nThe breeze is whispering secrets";
 
-        assert!(score_lyrics(repetitive) < 0.3, "repetition should score badly");
+        assert!(
+            score_lyrics(repetitive) < 0.3,
+            "repetition should score badly"
+        );
         assert!(score_lyrics(vocalising) < 0.3, "filler should score badly");
         assert!(score_lyrics(good) >= GOOD_ENOUGH, "real verses should pass");
         assert_eq!(score_lyrics(""), 0.0);
-        assert_eq!(score_lyrics("[Intro]\n[Outro]"), 0.0, "markers alone are not a song");
+        assert_eq!(
+            score_lyrics("[Intro]\n[Outro]"),
+            0.0,
+            "markers alone are not a song"
+        );
     }
 
     #[test]
@@ -464,7 +481,10 @@ mod tests {
                    We said we'd never let it go\nBut here we are once more\n\
                    The winter came and took the snow\nAnd left it at the door";
         let fixed = ensure_structure(raw);
-        assert!(has_structure(&fixed), "repair must produce verse and chorus");
+        assert!(
+            has_structure(&fixed),
+            "repair must produce verse and chorus"
+        );
         // Every original line survives.
         for line in raw.lines() {
             assert!(fixed.contains(line.trim()), "lost a line: {line}");
@@ -489,7 +509,8 @@ mod tests {
 
     #[test]
     fn strips_fences_and_commentary() {
-        let raw = "Here are the lyrics:\n```\n[Verse 1]\nStones by the river\n```\nI hope you like it!";
+        let raw =
+            "Here are the lyrics:\n```\n[Verse 1]\nStones by the river\n```\nI hope you like it!";
         assert_eq!(clean(raw), "[Verse 1]\nStones by the river");
     }
 

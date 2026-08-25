@@ -31,7 +31,7 @@ pub const MIN_SECONDS: f64 = 1.0;
 /// Returns the duration actually produced, which lands on the nearest frame
 /// boundary rather than exactly where the slider was.
 pub fn trim(input: &Path, start: f64, end: f64, output: &Path) -> Result<f64> {
-    if !(end - start >= MIN_SECONDS) {
+    if (end - start) < MIN_SECONDS {
         bail!("A trimmed song needs to be at least {MIN_SECONDS:.0} second long.");
     }
     let ext = input
@@ -46,12 +46,15 @@ pub fn trim(input: &Path, start: f64, end: f64, output: &Path) -> Result<f64> {
         other => bail!(
             "Aria can trim its own songs, which are MP3 or WAV. This one is {} \
              — export it and trim it in an audio editor.",
-            if other.is_empty() { "in an unknown format".into() } else { format!("a {other} file") }
+            if other.is_empty() {
+                "in an unknown format".into()
+            } else {
+                format!("a {other} file")
+            }
         ),
     };
 
-    std::fs::write(output, &bytes)
-        .with_context(|| format!("writing {}", output.display()))?;
+    std::fs::write(output, &bytes).with_context(|| format!("writing {}", output.display()))?;
     Ok(duration)
 }
 
@@ -226,17 +229,23 @@ fn frame_at(body: &[u8], pos: usize) -> Option<Frame> {
         return None;
     }
 
-    const MPEG1: [usize; 15] = [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320];
+    const MPEG1: [usize; 15] = [
+        0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320,
+    ];
     const MPEG2: [usize; 15] = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
     const RATES: [[usize; 3]; 4] = [
-        [11025, 12000, 8000], // MPEG2.5
-        [0, 0, 0],            // reserved
+        [11025, 12000, 8000],  // MPEG2.5
+        [0, 0, 0],             // reserved
         [22050, 24000, 16000], // MPEG2
         [44100, 48000, 32000], // MPEG1
     ];
 
     let is_mpeg1 = version == 3;
-    let bitrate = if is_mpeg1 { MPEG1[bitrate_index] } else { MPEG2[bitrate_index] } * 1000;
+    let bitrate = if is_mpeg1 {
+        MPEG1[bitrate_index]
+    } else {
+        MPEG2[bitrate_index]
+    } * 1000;
     let rate = RATES[version as usize][rate_index];
     if rate == 0 {
         return None;
@@ -248,7 +257,12 @@ fn frame_at(body: &[u8], pos: usize) -> Option<Frame> {
     if len < 4 || pos + len > body.len() {
         return None;
     }
-    Some(Frame { offset: pos, len, samples, rate })
+    Some(Frame {
+        offset: pos,
+        len,
+        samples,
+        rate,
+    })
 }
 
 /// True when the first frame is a Xing/Info/VBRI metadata frame rather than audio.
@@ -369,7 +383,9 @@ mod tests {
         let flac = dir.join("song.flac");
         std::fs::write(&flac, b"not really a flac").unwrap();
 
-        let err = trim(&flac, 0.0, 5.0, &dir.join("out.flac")).unwrap_err().to_string();
+        let err = trim(&flac, 0.0, 5.0, &dir.join("out.flac"))
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("flac"), "{err}");
         // Refused, not half-written.
         assert!(!dir.join("out.flac").exists());

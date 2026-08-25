@@ -39,11 +39,18 @@ pub enum Operation {
     /// Restyle the whole song, keeping its structure.
     Cover { caption: String, strength: f64 },
     /// Regenerate a slice of the song between two times, in seconds.
-    Repaint { start: f64, end: f64, caption: Option<String> },
+    Repaint {
+        start: f64,
+        end: f64,
+        caption: Option<String>,
+    },
     /// Make the song longer by painting past its end.
     Extend { seconds: f64 },
     /// Add a named instrument layer over the existing audio.
-    AddLayer { track: String, caption: Option<String> },
+    AddLayer {
+        track: String,
+        caption: Option<String>,
+    },
 }
 
 impl Operation {
@@ -100,7 +107,10 @@ pub struct StemChoice {
 pub fn stem_choices() -> Vec<StemChoice> {
     STEMS
         .iter()
-        .map(|(id, name)| StemChoice { id: (*id).into(), name: (*name).into() })
+        .map(|(id, name)| StemChoice {
+            id: (*id).into(),
+            name: (*name).into(),
+        })
         .collect()
 }
 
@@ -110,7 +120,9 @@ mod tests {
 
     #[test]
     fn titles_describe_the_derivation() {
-        let s = Operation::Stem { track: "drums".into() };
+        let s = Operation::Stem {
+            track: "drums".into(),
+        };
         assert_eq!(s.title_for("My Song"), "My Song — Drums");
         assert_eq!(s.task_type(), "extract");
         assert!(s.needs_sft());
@@ -124,9 +136,20 @@ mod tests {
 
     #[test]
     fn labels_carry_enough_to_reconstruct_lineage() {
-        assert_eq!(Operation::Stem { track: "bass".into() }.label(), "stem: bass");
         assert_eq!(
-            Operation::Repaint { start: 10.0, end: 20.0, caption: None }.label(),
+            Operation::Stem {
+                track: "bass".into()
+            }
+            .label(),
+            "stem: bass"
+        );
+        assert_eq!(
+            Operation::Repaint {
+                start: 10.0,
+                end: 20.0,
+                caption: None
+            }
+            .label(),
             "repaint 10-20s"
         );
     }

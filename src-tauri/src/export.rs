@@ -38,8 +38,7 @@ pub struct ExportReport {
 ///
 /// `m3u_name`, when present, also writes a playlist file listing them.
 pub fn export(tracks: &[Track], dest: &Path, m3u_name: Option<&str>) -> Result<ExportReport> {
-    std::fs::create_dir_all(dest)
-        .with_context(|| format!("creating {}", dest.display()))?;
+    std::fs::create_dir_all(dest).with_context(|| format!("creating {}", dest.display()))?;
 
     // Wide enough that the files sort correctly in any file manager, which is
     // the whole reason for numbering them.
@@ -56,7 +55,12 @@ pub fn export(tracks: &[Track], dest: &Path, m3u_name: Option<&str>) -> Result<E
             continue;
         }
         let ext = source.extension().and_then(|e| e.to_str()).unwrap_or("mp3");
-        let stem = format!("{:0width$} - {}", i + 1, safe_filename(&t.title), width = width);
+        let stem = format!(
+            "{:0width$} - {}",
+            i + 1,
+            safe_filename(&t.title),
+            width = width
+        );
 
         let audio_name = format!("{stem}.{ext}");
         std::fs::copy(source, dest.join(&audio_name))

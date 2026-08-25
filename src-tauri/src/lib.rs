@@ -126,7 +126,10 @@ fn default_true() -> bool {
 }
 
 fn now_secs() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// The language songs should be sung in when the user hasn't picked one.
@@ -224,7 +227,11 @@ async fn list_tracks(
 ) -> Result<Vec<Track>, String> {
     let st = Arc::clone(&state);
     tauri::async_runtime::spawn_blocking(move || {
-        st.library.lock().unwrap().list(limit.unwrap_or(500)).map_err(|e| e.to_string())
+        st.library
+            .lock()
+            .unwrap()
+            .list(limit.unwrap_or(500))
+            .map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -232,17 +239,32 @@ async fn list_tracks(
 
 #[tauri::command]
 fn set_favorite(state: State<'_, Arc<AppState>>, id: String, favorite: bool) -> Result<(), String> {
-    state.library.lock().unwrap().set_favorite(&id, favorite).map_err(|e| e.to_string())
+    state
+        .library
+        .lock()
+        .unwrap()
+        .set_favorite(&id, favorite)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn rename_track(state: State<'_, Arc<AppState>>, id: String, title: String) -> Result<(), String> {
-    state.library.lock().unwrap().rename(&id, &title).map_err(|e| e.to_string())
+    state
+        .library
+        .lock()
+        .unwrap()
+        .rename(&id, &title)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn delete_track(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    state.library.lock().unwrap().delete(&id).map_err(|e| e.to_string())
+    state
+        .library
+        .lock()
+        .unwrap()
+        .delete(&id)
+        .map_err(|e| e.to_string())
 }
 
 /// Whether this computer can make a video at all, and why not when it can't.
@@ -306,7 +328,11 @@ async fn trim_track(
         if !input.exists() {
             return Err("That song's file isn't where Aria left it.".into());
         }
-        let ext = input.extension().and_then(|e| e.to_str()).unwrap_or("mp3").to_string();
+        let ext = input
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("mp3")
+            .to_string();
 
         let new_id = uuid::Uuid::new_v4().to_string();
         let output = audio_dir.join(format!("{new_id}.{ext}"));
@@ -339,7 +365,11 @@ async fn trim_track(
             lyricist: source.lyricist.clone(),
             missing: false,
         };
-        st.library.lock().unwrap().insert(&track).map_err(|e| e.to_string())?;
+        st.library
+            .lock()
+            .unwrap()
+            .insert(&track)
+            .map_err(|e| e.to_string())?;
         Ok(track)
     })
     .await
@@ -372,8 +402,12 @@ async fn export_tracks(
             .collect();
         drop(lib);
 
-        export::export(&tracks, std::path::Path::new(&dest), playlist_name.as_deref())
-            .map_err(|e| e.to_string())
+        export::export(
+            &tracks,
+            std::path::Path::new(&dest),
+            playlist_name.as_deref(),
+        )
+        .map_err(|e| e.to_string())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -381,7 +415,12 @@ async fn export_tracks(
 
 #[tauri::command]
 fn list_personas(state: State<'_, Arc<AppState>>) -> Result<Vec<Persona>, String> {
-    state.library.lock().unwrap().personas().map_err(|e| e.to_string())
+    state
+        .library
+        .lock()
+        .unwrap()
+        .personas()
+        .map_err(|e| e.to_string())
 }
 
 /// Capture a track's singer under a name.
@@ -412,19 +451,34 @@ fn rename_persona(state: State<'_, Arc<AppState>>, id: String, name: String) -> 
     if name.is_empty() {
         return Err("A voice needs a name.".into());
     }
-    state.library.lock().unwrap().rename_persona(&id, name).map_err(|e| e.to_string())
+    state
+        .library
+        .lock()
+        .unwrap()
+        .rename_persona(&id, name)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn delete_persona(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    state.library.lock().unwrap().delete_persona(&id).map_err(|e| e.to_string())
+    state
+        .library
+        .lock()
+        .unwrap()
+        .delete_persona(&id)
+        .map_err(|e| e.to_string())
 }
 
 /// Playlists are small — a few hundred ids at most — so the whole set goes to
 /// the UI in one call and every membership question is answered locally.
 #[tauri::command]
 fn list_playlists(state: State<'_, Arc<AppState>>) -> Result<Vec<Playlist>, String> {
-    state.library.lock().unwrap().playlists().map_err(|e| e.to_string())
+    state
+        .library
+        .lock()
+        .unwrap()
+        .playlists()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -433,21 +487,40 @@ fn create_playlist(state: State<'_, Arc<AppState>>, name: String) -> Result<Play
     if name.is_empty() {
         return Err("A playlist needs a name.".into());
     }
-    state.library.lock().unwrap().create_playlist(name).map_err(|e| e.to_string())
+    state
+        .library
+        .lock()
+        .unwrap()
+        .create_playlist(name)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-fn rename_playlist(state: State<'_, Arc<AppState>>, id: String, name: String) -> Result<(), String> {
+fn rename_playlist(
+    state: State<'_, Arc<AppState>>,
+    id: String,
+    name: String,
+) -> Result<(), String> {
     let name = name.trim();
     if name.is_empty() {
         return Err("A playlist needs a name.".into());
     }
-    state.library.lock().unwrap().rename_playlist(&id, name).map_err(|e| e.to_string())
+    state
+        .library
+        .lock()
+        .unwrap()
+        .rename_playlist(&id, name)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 fn delete_playlist(state: State<'_, Arc<AppState>>, id: String) -> Result<(), String> {
-    state.library.lock().unwrap().delete_playlist(&id).map_err(|e| e.to_string())
+    state
+        .library
+        .lock()
+        .unwrap()
+        .delete_playlist(&id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -496,7 +569,13 @@ fn move_in_playlist(
 
 #[tauri::command]
 fn library_folder(state: State<'_, Arc<AppState>>) -> Result<String, String> {
-    Ok(state.library.lock().unwrap().audio_dir.display().to_string())
+    Ok(state
+        .library
+        .lock()
+        .unwrap()
+        .audio_dir
+        .display()
+        .to_string())
 }
 
 /// Bring an existing recording into the library.
@@ -517,7 +596,10 @@ fn import_audio(
 
     std::thread::spawn(move || {
         if let Err(e) = run_import(&app, &st, &jid, &path) {
-            let _ = app.emit("gen:error", json!({ "job_id": jid, "message": e.to_string() }));
+            let _ = app.emit(
+                "gen:error",
+                json!({ "job_id": jid, "message": e.to_string() }),
+            );
         }
     });
     Ok(job_id)
@@ -535,8 +617,8 @@ fn run_import(
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "Imported song".into());
 
-    let audio = std::fs::read(src)
-        .map_err(|e| anyhow::anyhow!("could not read {}: {e}", src.display()))?;
+    let audio =
+        std::fs::read(src).map_err(|e| anyhow::anyhow!("could not read {}: {e}", src.display()))?;
 
     {
         let mut eng = st.engine.lock().unwrap();
@@ -553,7 +635,14 @@ fn run_import(
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "audio".into());
     let job = ace.submit_understand(audio.clone(), &filename)?;
-    wait_for(&ace, &job, app, job_id, "composing", "Listening to your song")?;
+    wait_for(
+        &ace,
+        &job,
+        app,
+        job_id,
+        "composing",
+        "Listening to your song",
+    )?;
     let (analysis, latent) = ace.understand_result(&job)?;
 
     emit_stage(app, job_id, "saving", "Adding it to your library");
@@ -562,7 +651,10 @@ fn run_import(
 
     // Copy rather than reference: the library owns its files, and the original
     // stays exactly where the user put it.
-    let ext = src.extension().map(|e| e.to_string_lossy().to_string()).unwrap_or_else(|| "mp3".into());
+    let ext = src
+        .extension()
+        .map(|e| e.to_string_lossy().to_string())
+        .unwrap_or_else(|| "mp3".into());
     let audio_path = lib.audio_dir.join(format!("{id}.{ext}"));
     std::fs::write(&audio_path, &audio)?;
     let latent_path = latent.as_ref().and_then(|l| {
@@ -574,13 +666,33 @@ fn run_import(
         id,
         title: name,
         prompt: String::new(),
-        caption: analysis.get("caption").and_then(Value::as_str).unwrap_or_default().to_string(),
-        lyrics: analysis.get("lyrics").and_then(Value::as_str).unwrap_or_default().to_string(),
+        caption: analysis
+            .get("caption")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        lyrics: analysis
+            .get("lyrics")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
         bpm: analysis.get("bpm").and_then(Value::as_i64),
-        keyscale: analysis.get("keyscale").and_then(Value::as_str).map(String::from),
-        timesignature: analysis.get("timesignature").and_then(Value::as_str).map(String::from),
-        vocal_language: analysis.get("vocal_language").and_then(Value::as_str).map(String::from),
-        duration: analysis.get("duration").and_then(Value::as_f64).unwrap_or(0.0),
+        keyscale: analysis
+            .get("keyscale")
+            .and_then(Value::as_str)
+            .map(String::from),
+        timesignature: analysis
+            .get("timesignature")
+            .and_then(Value::as_str)
+            .map(String::from),
+        vocal_language: analysis
+            .get("vocal_language")
+            .and_then(Value::as_str)
+            .map(String::from),
+        duration: analysis
+            .get("duration")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0),
         seed: None,
         model: String::new(),
         audio_path: audio_path.display().to_string(),
@@ -724,8 +836,16 @@ fn remake_like(
 
     let options = GenerateOptions {
         prompt,
-        lyrics: if keep_words { track.lyrics.clone() } else { String::new() },
-        duration: if track.duration > 0.0 { track.duration } else { 60.0 },
+        lyrics: if keep_words {
+            track.lyrics.clone()
+        } else {
+            String::new()
+        },
+        duration: if track.duration > 0.0 {
+            track.duration
+        } else {
+            60.0
+        },
         instrumental: track.lyrics.trim() == "[Instrumental]",
         embellish: true,
         bpm: track.bpm,
@@ -741,7 +861,11 @@ fn remake_like(
         }),
         lyric_variety: None,
         variations: Some(1),
-        format: Some(if track.audio_path.ends_with(".wav") { "wav24".into() } else { "mp3".into() }),
+        format: Some(if track.audio_path.ends_with(".wav") {
+            "wav24".into()
+        } else {
+            "mp3".into()
+        }),
         // Keep the singer, so a set of songs can hold together. Not a persona:
         // this is explicitly "another one like *that* song", so the reference
         // is that track rather than a voice saved under a name.
@@ -771,7 +895,11 @@ fn log_ui_error(state: State<'_, Arc<AppState>>, message: String, stack: Option<
         stack.unwrap_or_default()
     );
     use std::io::Write;
-    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         let _ = f.write_all(entry.as_bytes());
     }
     eprintln!("[ui error] {message}");
@@ -792,7 +920,10 @@ fn derive_track(
 
     std::thread::spawn(move || {
         if let Err(e) = run_derive(&app, &st, &jid, &id, operation) {
-            let _ = app.emit("gen:error", json!({ "job_id": jid, "message": e.to_string() }));
+            let _ = app.emit(
+                "gen:error",
+                json!({ "job_id": jid, "message": e.to_string() }),
+            );
         }
     });
     Ok(job_id)
@@ -824,9 +955,7 @@ fn run_derive(
     let models = st.engine.lock().unwrap().paths.available_models()?;
     let dit = if op.needs_sft() {
         models.dit_sft.first().cloned().ok_or_else(|| {
-            anyhow::anyhow!(
-                "This needs the detailed sound model, which isn't installed yet."
-            )
+            anyhow::anyhow!("This needs the detailed sound model, which isn't installed yet.")
         })?
     } else {
         models
@@ -871,7 +1000,11 @@ fn run_derive(
             req["caption"] = json!(caption);
             req["audio_cover_strength"] = json!(strength);
         }
-        derive::Operation::Repaint { start, end, caption } => {
+        derive::Operation::Repaint {
+            start,
+            end,
+            caption,
+        } => {
             req["repainting_start"] = json!(start);
             req["repainting_end"] = json!(end);
             if let Some(c) = caption {
@@ -890,11 +1023,19 @@ fn run_derive(
         .latent_path
         .as_ref()
         .and_then(|p| std::fs::read(p).ok());
-    let audio = if latent.is_none() { std::fs::read(&source.audio_path).ok() } else { None };
+    let audio = if latent.is_none() {
+        std::fs::read(&source.audio_path).ok()
+    } else {
+        None
+    };
 
     let job = ace.submit_synth_with_source(
         &req,
-        SynthSources { audio, latent, ..Default::default() },
+        SynthSources {
+            audio,
+            latent,
+            ..Default::default()
+        },
     )?;
     wait_for(&ace, &job, app, job_id, "rendering", &describe(&op))?;
     let out = ace.synth_result(&job)?;
@@ -1026,7 +1167,11 @@ fn run_generation(
                 // Did the engine die, and did it die from a lost GPU device?
                 let (died, device_lost, explanation) = {
                     let mut eng = st.engine.lock().unwrap();
-                    (eng.has_died(), eng.crashed_on_device_lost(), eng.explain_failure())
+                    (
+                        eng.has_died(),
+                        eng.crashed_on_device_lost(),
+                        eng.explain_failure(),
+                    )
                 };
 
                 if !died {
@@ -1166,7 +1311,9 @@ fn attempt_generation(
             if wait_for(ace, &id, app, job_id, "writing", "Writing the words").is_err() {
                 break;
             }
-            let Ok(results) = ace.lm_results(&id) else { break };
+            let Ok(results) = ace.lm_results(&id) else {
+                break;
+            };
             let text = results
                 .first()
                 .and_then(|r| r.get("lyrics"))
@@ -1275,7 +1422,10 @@ fn attempt_generation(
     req["use_cot_caption"] = json!(opts.embellish && !keep_caption);
     // A persona's tempo and key are defaults, not overrides: they apply only
     // where the user left the control on automatic.
-    let bpm = opts.bpm.filter(|b| *b > 0).or_else(|| persona.as_ref().and_then(|p| p.bpm));
+    let bpm = opts
+        .bpm
+        .filter(|b| *b > 0)
+        .or_else(|| persona.as_ref().and_then(|p| p.bpm));
     if let Some(b) = bpm {
         req["bpm"] = json!(b);
     }
@@ -1308,7 +1458,11 @@ fn attempt_generation(
     // for anyone taking a track into a DAW.
     let format = opts.format.clone().unwrap_or_else(|| "mp3".into());
     req["output_format"] = json!(format);
-    let ext = if format.starts_with("wav") { "wav" } else { "mp3" };
+    let ext = if format.starts_with("wav") {
+        "wav"
+    } else {
+        "mp3"
+    };
 
     // Voice reference, if one was chosen. The cached latent is preferred, same
     // as everywhere else, because it skips a VAE encode.
@@ -1319,9 +1473,15 @@ fn attempt_generation(
     let voice: Option<SynthSources> = match persona.as_ref() {
         Some(p) => std::fs::read(&p.voice_path).ok().map(|bytes| {
             if p.voice_is_latent {
-                SynthSources { ref_latent: Some(bytes), ..Default::default() }
+                SynthSources {
+                    ref_latent: Some(bytes),
+                    ..Default::default()
+                }
             } else {
-                SynthSources { ref_audio: Some(bytes), ..Default::default() }
+                SynthSources {
+                    ref_audio: Some(bytes),
+                    ..Default::default()
+                }
             }
         }),
         None => opts
@@ -1336,7 +1496,11 @@ fn attempt_generation(
                 } else {
                     None
                 };
-                SynthSources { ref_audio, ref_latent, ..Default::default() }
+                SynthSources {
+                    ref_audio,
+                    ref_latent,
+                    ..Default::default()
+                }
             }),
     };
 
@@ -1392,13 +1556,33 @@ fn attempt_generation(
                 base_title
             },
             prompt: opts.prompt.clone(),
-            caption: enriched.get("caption").and_then(Value::as_str).unwrap_or_default().to_string(),
-            lyrics: enriched.get("lyrics").and_then(Value::as_str).unwrap_or_default().to_string(),
+            caption: enriched
+                .get("caption")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            lyrics: enriched
+                .get("lyrics")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
             bpm: enriched.get("bpm").and_then(Value::as_i64),
-            keyscale: enriched.get("keyscale").and_then(Value::as_str).map(String::from),
-            timesignature: enriched.get("timesignature").and_then(Value::as_str).map(String::from),
-            vocal_language: enriched.get("vocal_language").and_then(Value::as_str).map(String::from),
-            duration: enriched.get("duration").and_then(Value::as_f64).unwrap_or(opts.duration),
+            keyscale: enriched
+                .get("keyscale")
+                .and_then(Value::as_str)
+                .map(String::from),
+            timesignature: enriched
+                .get("timesignature")
+                .and_then(Value::as_str)
+                .map(String::from),
+            vocal_language: enriched
+                .get("vocal_language")
+                .and_then(Value::as_str)
+                .map(String::from),
+            duration: enriched
+                .get("duration")
+                .and_then(Value::as_f64)
+                .unwrap_or(opts.duration),
             seed: enriched.get("seed").and_then(Value::as_i64),
             model: dit_model.clone(),
             audio_path: audio_path.display().to_string(),
@@ -1435,7 +1619,9 @@ fn wait_for(
     loop {
         match ace.poll(id)? {
             JobStatus::Done => return Ok(()),
-            JobStatus::Failed => return Err(anyhow::anyhow!("the engine could not finish this song")),
+            JobStatus::Failed => {
+                return Err(anyhow::anyhow!("the engine could not finish this song"))
+            }
             JobStatus::Cancelled => return Err(anyhow::anyhow!("cancelled")),
             _ => {}
         }
@@ -1562,16 +1748,45 @@ pub fn run() {
 #[tauri::command]
 fn languages() -> Vec<(String, String)> {
     [
-        ("en", "English"), ("es", "Spanish"), ("fr", "French"), ("de", "German"),
-        ("it", "Italian"), ("pt", "Portuguese"), ("nl", "Dutch"), ("pl", "Polish"),
-        ("ru", "Russian"), ("uk", "Ukrainian"), ("tr", "Turkish"), ("ar", "Arabic"),
-        ("he", "Hebrew"), ("hi", "Hindi"), ("bn", "Bengali"), ("ta", "Tamil"),
-        ("ur", "Urdu"), ("fa", "Persian"), ("zh", "Chinese"), ("ja", "Japanese"),
-        ("ko", "Korean"), ("vi", "Vietnamese"), ("th", "Thai"), ("id", "Indonesian"),
-        ("ms", "Malay"), ("tl", "Filipino"), ("sw", "Swahili"), ("yo", "Yoruba"),
-        ("zu", "Zulu"), ("af", "Afrikaans"), ("el", "Greek"), ("sv", "Swedish"),
-        ("no", "Norwegian"), ("da", "Danish"), ("fi", "Finnish"), ("cs", "Czech"),
-        ("hu", "Hungarian"), ("ro", "Romanian"), ("mi", "Māori"),
+        ("en", "English"),
+        ("es", "Spanish"),
+        ("fr", "French"),
+        ("de", "German"),
+        ("it", "Italian"),
+        ("pt", "Portuguese"),
+        ("nl", "Dutch"),
+        ("pl", "Polish"),
+        ("ru", "Russian"),
+        ("uk", "Ukrainian"),
+        ("tr", "Turkish"),
+        ("ar", "Arabic"),
+        ("he", "Hebrew"),
+        ("hi", "Hindi"),
+        ("bn", "Bengali"),
+        ("ta", "Tamil"),
+        ("ur", "Urdu"),
+        ("fa", "Persian"),
+        ("zh", "Chinese"),
+        ("ja", "Japanese"),
+        ("ko", "Korean"),
+        ("vi", "Vietnamese"),
+        ("th", "Thai"),
+        ("id", "Indonesian"),
+        ("ms", "Malay"),
+        ("tl", "Filipino"),
+        ("sw", "Swahili"),
+        ("yo", "Yoruba"),
+        ("zu", "Zulu"),
+        ("af", "Afrikaans"),
+        ("el", "Greek"),
+        ("sv", "Swedish"),
+        ("no", "Norwegian"),
+        ("da", "Danish"),
+        ("fi", "Finnish"),
+        ("cs", "Czech"),
+        ("hu", "Hungarian"),
+        ("ro", "Romanian"),
+        ("mi", "Māori"),
     ]
     .iter()
     .map(|(c, n)| (c.to_string(), n.to_string()))
@@ -1635,7 +1850,10 @@ fn audio_output_available() -> bool {
         "/usr/local/lib/gstreamer-1.0",
     ];
     if let Ok(extra) = std::env::var("GST_PLUGIN_PATH") {
-        if std::path::Path::new(&extra).join("libgstautodetect.so").exists() {
+        if std::path::Path::new(&extra)
+            .join("libgstautodetect.so")
+            .exists()
+        {
             return true;
         }
     }
@@ -1656,7 +1874,10 @@ mod tests {
 
     #[test]
     fn builds_titles_from_prompts() {
-        assert_eq!(title_from("warm indie folk with guitar"), "Warm indie folk with guitar");
+        assert_eq!(
+            title_from("warm indie folk with guitar"),
+            "Warm indie folk with guitar"
+        );
         assert_eq!(title_from(""), "Untitled");
         assert_eq!(
             title_from("dreamy lo-fi hip hop, mellow rhodes piano, soft vinyl"),

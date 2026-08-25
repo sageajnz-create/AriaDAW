@@ -47,7 +47,11 @@ pub struct EngineSettings {
 
 impl Default for EngineSettings {
     fn default() -> Self {
-        Self { vae_chunk: DEFAULT_CHUNK, vae_chunk_verified: false, cpu_fallback: false }
+        Self {
+            vae_chunk: DEFAULT_CHUNK,
+            vae_chunk_verified: false,
+            cpu_fallback: false,
+        }
     }
 }
 
@@ -81,7 +85,10 @@ impl EnginePaths {
             let models = root.join("models");
             for candidate in [bin, shared, alt] {
                 if candidate.is_file() && models.is_dir() {
-                    return Ok(Self { server_bin: candidate, models_dir: models });
+                    return Ok(Self {
+                        server_bin: candidate,
+                        models_dir: models,
+                    });
                 }
             }
         }
@@ -164,7 +171,6 @@ impl AvailableModels {
     pub fn supports_stems(&self) -> bool {
         !self.dit_sft.is_empty()
     }
-
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -205,6 +211,7 @@ impl Engine {
         *self.state.lock().unwrap()
     }
 
+    #[allow(dead_code)]
     pub fn recent_log(&self) -> Vec<String> {
         self.log_tail.lock().unwrap().clone()
     }
@@ -222,15 +229,23 @@ impl Engine {
     #[cfg(target_os = "linux")]
     fn reclaim_orphan(&self) {
         let me = std::process::id();
-        let Ok(entries) = std::fs::read_dir("/proc") else { return };
+        let Ok(entries) = std::fs::read_dir("/proc") else {
+            return;
+        };
         for entry in entries.flatten() {
-            let Some(pid) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok()) else {
+            let Some(pid) = entry
+                .file_name()
+                .to_str()
+                .and_then(|s| s.parse::<u32>().ok())
+            else {
                 continue;
             };
             if pid == me {
                 continue;
             }
-            let Ok(raw) = std::fs::read(entry.path().join("cmdline")) else { continue };
+            let Ok(raw) = std::fs::read(entry.path().join("cmdline")) else {
+                continue;
+            };
             // /proc cmdline is NUL-separated.
             let cmdline = String::from_utf8_lossy(&raw).replace('\0', " ");
             let ours = cmdline.contains("ace-server")
@@ -332,7 +347,10 @@ impl Engine {
         }
 
         let mut child = cmd.spawn().with_context(|| {
-            format!("failed to launch engine at {}", self.paths.server_bin.display())
+            format!(
+                "failed to launch engine at {}",
+                self.paths.server_bin.display()
+            )
         })?;
 
         // Drain stderr into a ring buffer. Without this the pipe fills and the
@@ -380,7 +398,12 @@ impl Engine {
                     ));
                 }
             }
-            if client.get(&url).send().map(|r| r.status().is_success()).unwrap_or(false) {
+            if client
+                .get(&url)
+                .send()
+                .map(|r| r.status().is_success())
+                .unwrap_or(false)
+            {
                 *self.state.lock().unwrap() = EngineState::Ready;
                 return Ok(());
             }
@@ -388,7 +411,9 @@ impl Engine {
         }
 
         *self.state.lock().unwrap() = EngineState::Crashed;
-        Err(anyhow!("engine did not become ready within {STARTUP_TIMEOUT:?}"))
+        Err(anyhow!(
+            "engine did not become ready within {STARTUP_TIMEOUT:?}"
+        ))
     }
 
     pub fn stop(&mut self) {
