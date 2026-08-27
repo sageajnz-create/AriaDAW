@@ -31,6 +31,33 @@ After the one-time model download, Aria works completely offline.
 - **Follow the words** — lyrics scroll with the song while it plays
 - **Keep everything** — plain audio files in a folder you control
 
+## Lyrics need a small language model
+
+Aria writes lyrics with a local instruct model through
+[Ollama](https://ollama.com) — separate from the music model, and worth the
+five minutes it takes to set up:
+
+```bash
+ollama pull llama3.2:3b     # about 2 GB, and it never leaves your computer
+```
+
+Without it Aria still makes songs, but the music model writes the words from
+its own description of the sound, so they usually aren't about what you asked
+for. Measured on one prompt — *"an uplifting indie electronic song about Sage
+and his computer, and how he loves making music with AI"*:
+
+| | With a writer | Without |
+|---|---|---|
+| Lyrics about the subject | yes — named it four times | no, an unrelated subject |
+| Distinct lines | 12 of 16 | 24 of 36, then drifted into another language |
+
+It costs about three seconds per song and runs on the CPU, so it never competes
+with the music model for graphics memory. Cloud-hosted models are deliberately
+ignored: your words never leave your machine.
+
+Aria tells you in the app when it can't find one, rather than letting a finished
+song be the first hint.
+
 ## Requirements
 
 Any reasonably modern GPU works — AMD, Intel, or NVIDIA — via **Vulkan**, so there's

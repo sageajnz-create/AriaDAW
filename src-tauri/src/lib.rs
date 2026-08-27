@@ -19,6 +19,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::path::Path;
+use std::process::Command;
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use client::{AceClient, JobStatus, SynthSources};
@@ -43,6 +45,15 @@ pub struct EngineStatus {
     /// False when no engine binary has been built or bundled. The rest of the
     /// app still works; only generation is unavailable.
     engine_installed: bool,
+    /// The local instruct model writing lyrics, when one is reachable.
+    ///
+    /// `None` is a materially worse product, not a missing nicety: without it
+    /// the music model writes the words from its own rewritten description, so
+    /// they are usually not about what the user asked for. Measured on one
+    /// prompt: with a writer, 12/16 distinct lines naming the subject; without,
+    /// lyrics about an unrelated subject that drifted into another language.
+    /// The UI says so rather than letting a finished song be the first hint.
+    lyric_writer: Option<String>,
     models: AvailableModels,
     models_complete: bool,
     supports_stems: bool,
@@ -201,6 +212,7 @@ async fn engine_status(state: State<'_, Arc<AppState>>) -> Result<EngineStatus, 
         EngineStatus {
             state: eng.state(),
             engine_installed: eng.paths.engine_installed(),
+            lyric_writer: lyrics::LyricWriter::detect().map(|w| w.model_name().to_string()),
             models_complete: models.is_complete(),
             supports_stems: models.supports_stems(),
             models,
@@ -1426,9 +1438,12 @@ fn attempt_generation(
     req["use_cot_caption"] = json!(opts.embellish && !keep_caption);
     // A persona's tempo and key are defaults, not overrides: they apply only
     // where the user left the control on automatic.
+    // The control wins, then what the user actually wrote, then the persona's
+    // default — most specific to this request first.
     let bpm = opts
         .bpm
         .filter(|b| *b > 0)
+        .or_else(|| bpm_from_prompt(&opts.prompt))
         .or_else(|| persona.as_ref().and_then(|p| p.bpm));
     if let Some(b) = bpm {
         req["bpm"] = json!(b);
@@ -1526,6 +1541,14 @@ fn attempt_generation(
         enriched["output_format"] = json!(format);
         enriched["mp3_bitrate"] = json!(320);
         enriched["peak_clip"] = json!(0);
+        // The caption Phase 1 wrote also conditions the DiT, so a fade written
+        // into it gets rendered twice over. Take it out before the audio is.
+        if let Some(c) = enriched.get("caption").and_then(Value::as_str) {
+            let cleaned = without_fade_out(c);
+            if cleaned != c {
+                enriched["caption"] = json!(cleaned);
+            }
+        }
 
         let synth_id = match &voice {
             Some(v) => ace.submit_synth_with_source(
@@ -1545,6 +1568,15 @@ fn attempt_generation(
         let lib = st.library.lock().unwrap();
         let audio_path = lib.audio_dir.join(format!("{id}.{ext}"));
         std::fs::write(&audio_path, &out.audio)?;
+        // The fade filter stops the model sliding away, but it still sometimes
+        // finishes the arrangement early and leaves the rest of the codes empty
+        // — 6.4s of true silence on a measured 2:30 render. Nobody asked for
+        // that, so it goes. Best effort: if it can't be done the song stands.
+        let rendered = enriched
+            .get("duration")
+            .and_then(Value::as_f64)
+            .unwrap_or(opts.duration);
+        let duration = trim_dead_air(&audio_path, rendered).unwrap_or(rendered);
 
         let latent_path = out.latent.as_ref().and_then(|l| {
             let p = lib.audio_dir.join(format!("{id}.latent"));
@@ -1583,10 +1615,8 @@ fn attempt_generation(
                 .get("vocal_language")
                 .and_then(Value::as_str)
                 .map(String::from),
-            duration: enriched
-                .get("duration")
-                .and_then(Value::as_f64)
-                .unwrap_or(opts.duration),
+            // After any dead-air trim, so the library shows what actually plays.
+            duration,
             seed: enriched.get("seed").and_then(Value::as_i64),
             model: dit_model.clone(),
             audio_path: audio_path.display().to_string(),
@@ -1638,6 +1668,55 @@ fn wait_for(
     }
 }
 
+/// Decode audio to mono-interleaved PCM so silence can be measured.
+///
+/// Uses ffmpeg, which this app already treats as optional and detected rather
+/// than bundled — see `video.rs`. Returning `None` when it isn't installed is
+/// the point: a missing decoder must cost the user a few seconds of dead air,
+/// never a song.
+fn decode_pcm(path: &Path) -> Option<(Vec<i16>, u32, u16)> {
+    const RATE: u32 = 48_000;
+    let out = Command::new("ffmpeg")
+        .args(["-v", "error", "-i"])
+        .arg(path)
+        .args(["-ac", "1", "-ar", &RATE.to_string(), "-f", "s16le", "-"])
+        .output()
+        .ok()?;
+    if !out.status.success() || out.stdout.len() < 2 {
+        return None;
+    }
+    let samples = out
+        .stdout
+        .chunks_exact(2)
+        .map(|b| i16::from_le_bytes([b[0], b[1]]))
+        .collect();
+    Some((samples, RATE, 1))
+}
+
+/// Cut dead air off the end of a freshly rendered song, in place.
+///
+/// Returns the new duration when something was cut. Every failure path leaves
+/// the file exactly as it was: a song with a silent tail is a far better
+/// outcome than a song that got mangled trying to remove one.
+fn trim_dead_air(path: &Path, duration: f64) -> Option<f64> {
+    let (samples, rate, channels) = decode_pcm(path)?;
+    let quiet = trailing_silence(&samples, rate, channels);
+    if quiet <= 0.0 {
+        return None;
+    }
+    let played = (samples.len() as f64 / rate as f64) - quiet;
+    // Leave a breath at the end rather than cutting the last note dead.
+    let end = (played + 0.25).min(duration);
+    if end <= 0.0 || duration - end < 1.0 {
+        return None;
+    }
+
+    let temp = path.with_extension("trimmed");
+    let new_duration = trim::trim(path, 0.0, end, &temp).ok()?;
+    std::fs::rename(&temp, path).ok()?;
+    Some(new_duration)
+}
+
 /// A readable title from the prompt: first few words, trimmed.
 fn title_from(prompt: &str) -> String {
     let words: Vec<&str> = prompt.split_whitespace().take(6).collect();
@@ -1649,6 +1728,158 @@ fn title_from(prompt: &str) -> String {
             t.replace_range(0..c.len_utf8(), &c.to_uppercase().to_string());
         }
         t.trim_end_matches(&[',', '.', ';'][..]).to_string()
+    }
+}
+
+/// Pull an explicit tempo out of what the user typed.
+///
+/// Tempo written in prose does not survive: Phase 1 rewrites the caption into
+/// its own description and picks its own tempo, so "Around 112 BPM" in a
+/// description came back as 86. The request has a `bpm` field that *is*
+/// honoured, and the Studio control fills it — but someone who states the
+/// tempo in words has been just as clear, and silently ignoring them is the
+/// bug. So read it out of the text and treat it as if the control were set.
+///
+/// Only a stated number counts. "Fast" and "upbeat" are the caption's job.
+fn bpm_from_prompt(prompt: &str) -> Option<i64> {
+    let lower = prompt.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    // Look for "<number> bpm", allowing "112bpm" and "112 bpm".
+    let mut at = 0;
+    while let Some(found) = lower[at..].find("bpm") {
+        let idx = at + found;
+        let head = lower[..idx].trim_end();
+        let digits: String = head
+            .chars()
+            .rev()
+            .take_while(char::is_ascii_digit)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        if let Ok(n) = digits.parse::<i64>() {
+            // Outside this range it is a year, a track number, or a typo.
+            if (40..=220).contains(&n) {
+                return Some(n);
+            }
+        }
+        at = idx + 3;
+        if at >= bytes.len() {
+            break;
+        }
+    }
+    None
+}
+
+/// Strip fade-out instructions from a caption the engine wrote for itself.
+///
+/// Phase 1 expands the user's description into a much richer one, and it likes
+/// to end that description with a fade — two observed examples ended "eventually
+/// fading out to the initial ambient textures" and "...a final chorus and fading
+/// out on its signature riff". Phase 2 and the DiT then faithfully render one,
+/// so a 2:30 request came back at full level only to 2:10 and slid away after.
+///
+/// Someone who asks for two and a half minutes of music wants two and a half
+/// minutes of music. Only the fade goes.
+///
+/// Removing the whole sentence was the first attempt and took too much with it:
+/// on the second example it also deleted the bridge and the final chorus, 139
+/// characters to remove a fade. So the cut is made at the clause instead — back
+/// to the conjunction that introduced the fade, and no further.
+fn without_fade_out(caption: &str) -> String {
+    /// Where a trailing clause can begin. Longest first, so ", and " wins over
+    /// " and " and we don't leave a dangling comma.
+    const JOINS: &[&str] = &[
+        ", and ",
+        ", then ",
+        ", eventually ",
+        ", before ",
+        " and then ",
+        " and ",
+        " before ",
+        " then ",
+        " eventually ",
+        ", ",
+    ];
+
+    fn mentions_fade(text: &str) -> bool {
+        let lower = text.to_ascii_lowercase();
+        let fades = (lower.contains("fade") || lower.contains("fading"))
+            && (lower.contains("out") || lower.contains("away") || lower.contains("end"));
+        let outro =
+            lower.contains("outro") && (lower.contains("ambient") || lower.contains("quiet"));
+        fades || outro
+    }
+
+    let mut kept: Vec<String> = Vec::new();
+    for sentence in caption.split_inclusive(['.', ';']) {
+        if !mentions_fade(sentence) {
+            kept.push(sentence.to_string());
+            continue;
+        }
+
+        let lower = sentence.to_ascii_lowercase();
+        // Where the fade talk starts, so we only consider joins before it.
+        let Some(fade_at) = ["fade", "fading", "outro"]
+            .iter()
+            .filter_map(|w| lower.find(w))
+            .min()
+        else {
+            continue;
+        };
+
+        // The last clause boundary before the fade is where the cut goes.
+        let cut = JOINS.iter().filter_map(|j| lower[..fade_at].rfind(j)).max();
+
+        match cut {
+            // Keep everything up to the conjunction, restoring the sentence end.
+            Some(at) if at > 0 => {
+                let head = sentence[..at].trim_end().to_string();
+                kept.push(format!("{head}. "));
+            }
+            // The fade is the whole sentence: drop it.
+            _ => {}
+        }
+    }
+
+    let out = kept.join("").trim().to_string();
+    // Never hand back nothing: the caption is what gives the DiT its production
+    // detail, and an empty one is worse than a fade.
+    if out.len() < 40 {
+        caption.trim().to_string()
+    } else {
+        out
+    }
+}
+
+/// How much silence sits at the end of rendered audio, in seconds.
+///
+/// Separate from the fade: with the fade removed the model still sometimes
+/// finishes the arrangement early and leaves the remaining codes empty — a
+/// measured 6.4s of true silence at the end of a 2:30 track. Nobody asked for
+/// six seconds of nothing, so it gets cut.
+///
+/// Deliberately conservative. It reads the decoded tail only, treats anything
+/// above the threshold as music, and returns 0 unless the run is long enough to
+/// be dead air rather than a rest between phrases.
+fn trailing_silence(samples: &[i16], sample_rate: u32, channels: u16) -> f64 {
+    const FLOOR: i16 = 328; // about -40 dBFS
+    const MIN_RUN: f64 = 1.5; // shorter than this is musical, not dead air
+
+    let frame = channels.max(1) as usize;
+    if samples.is_empty() || sample_rate == 0 {
+        return 0.0;
+    }
+    let quiet_frames = samples
+        .rchunks(frame)
+        .take_while(|f| f.iter().all(|s| s.saturating_abs() < FLOOR))
+        .count();
+
+    let seconds = quiet_frames as f64 / sample_rate as f64;
+    if seconds >= MIN_RUN {
+        seconds
+    } else {
+        0.0
     }
 }
 
@@ -1882,7 +2113,124 @@ fn audio_output_available() -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::title_from;
+    use super::{bpm_from_prompt, title_from, trailing_silence, without_fade_out};
+
+    // Observed: "Around 112 BPM" in the description came back as 86, because
+    // Phase 1 rewrites the caption and chooses its own tempo.
+    #[test]
+    fn a_tempo_stated_in_words_is_treated_as_if_the_control_were_set() {
+        assert_eq!(
+            bpm_from_prompt("uplifting synth-pop, around 112 BPM"),
+            Some(112)
+        );
+        assert_eq!(bpm_from_prompt("drum and bass at 174bpm"), Some(174));
+        assert_eq!(bpm_from_prompt("SLOW BALLAD, 70 Bpm"), Some(70));
+    }
+
+    #[test]
+    fn a_tempo_nobody_stated_is_left_for_the_model_to_choose() {
+        assert_eq!(bpm_from_prompt("something fast and upbeat"), None);
+        assert_eq!(bpm_from_prompt("a song about my dog"), None);
+        // Not a tempo: out of musical range.
+        assert_eq!(bpm_from_prompt("a tribute to 1984, 300 bpm"), None);
+    }
+
+    // The real caption from the run that exposed the blunt version: removing
+    // the whole sentence also deleted the bridge and the final chorus.
+    #[test]
+    fn only_the_fade_clause_goes_not_the_arrangement_around_it() {
+        let caption = "An uplifting synth-pop track with shimmering arpeggiated synths. \
+                       A brief bridge section strips back to just vocals before swelling \
+                       again for a final chorus and fading out on its signature riff.";
+
+        let cleaned = without_fade_out(caption);
+
+        assert!(!cleaned.to_lowercase().contains("fading"), "{cleaned}");
+        assert!(
+            cleaned.contains("bridge section"),
+            "the bridge must survive: {cleaned}"
+        );
+        assert!(
+            cleaned.contains("final chorus"),
+            "the final chorus must survive: {cleaned}"
+        );
+    }
+
+    // The engine wrote this one itself, and the DiT then rendered the fade.
+    #[test]
+    fn a_fade_out_the_engine_wrote_is_taken_back_out() {
+        let caption = "An uplifting synth-pop track with shimmering arpeggiated synths \
+                       and a driving four-on-the-floor beat. A brief bridge offers a moment \
+                       of reflection. Eventually fading out to the initial ambient textures.";
+
+        let cleaned = without_fade_out(caption);
+
+        assert!(!cleaned.to_lowercase().contains("fading out"), "{cleaned}");
+        assert!(
+            cleaned.contains("four-on-the-floor"),
+            "the production detail must survive"
+        );
+    }
+
+    // The caption is what gives the DiT its production detail; stripping it to
+    // nothing would be a worse failure than the fade.
+    #[test]
+    fn a_caption_that_is_only_a_fade_is_left_alone_rather_than_emptied() {
+        let caption = "Fading out.";
+        assert_eq!(without_fade_out(caption), "Fading out.");
+    }
+
+    #[test]
+    fn a_caption_with_no_fade_is_untouched() {
+        let caption = "Warm indie folk with fingerpicked guitar, brushed drums and a \
+                       tender lead vocal that ends on a held chord.";
+        assert_eq!(without_fade_out(caption), caption.trim());
+    }
+
+    fn tone(seconds: f64, rate: u32) -> Vec<i16> {
+        (0..(seconds * rate as f64) as usize)
+            .map(|i| if i % 2 == 0 { 8000 } else { -8000 })
+            .collect()
+    }
+
+    // Measured on a real 2:30 render: 6.4s of true silence after the model
+    // finished the arrangement early.
+    #[test]
+    fn dead_air_at_the_end_is_measured_so_it_can_be_cut() {
+        let mut samples = tone(10.0, 48_000);
+        samples.extend(std::iter::repeat_n(0i16, 48_000 * 6));
+
+        let quiet = trailing_silence(&samples, 48_000, 1);
+
+        assert!((quiet - 6.0).abs() < 0.05, "got {quiet}");
+    }
+
+    // A rest between phrases is music, not dead air.
+    #[test]
+    fn a_short_rest_before_the_end_is_left_alone() {
+        let mut samples = tone(10.0, 48_000);
+        samples.extend(std::iter::repeat_n(0i16, 48_000 / 2));
+
+        assert_eq!(trailing_silence(&samples, 48_000, 1), 0.0);
+    }
+
+    #[test]
+    fn a_track_that_plays_to_its_last_sample_has_nothing_to_cut() {
+        assert_eq!(trailing_silence(&tone(5.0, 48_000), 48_000, 1), 0.0);
+        assert_eq!(trailing_silence(&[], 48_000, 2), 0.0);
+    }
+
+    // End to end on the real render that exposed this: 150.0s of file with the
+    // music stopping at 143.6s.
+    #[test]
+    #[ignore = "needs ffmpeg and the sample track; run with --ignored"]
+    fn dead_air_is_cut_off_a_real_render() {
+        let src = std::path::Path::new(
+            "/tmp/claude-1000/-home-omarsage-Work/64bb2e8e-3fd7-47e2-994c-2b1e03847cd6/scratchpad/trimtest.mp3",
+        );
+        let shorter = super::trim_dead_air(src, 150.0).expect("should have found dead air");
+        assert!(shorter > 140.0 && shorter < 146.0, "trimmed to {shorter}");
+    }
 
     #[test]
     fn builds_titles_from_prompts() {

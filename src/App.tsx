@@ -282,6 +282,7 @@ export default function App() {
                 tracks={tracks}
                 personas={personas}
                 onPersonasChanged={refreshPersonas}
+                lyricWriter={status?.lyric_writer ?? null}
               />
             </div>
           ) : (

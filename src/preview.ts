@@ -96,6 +96,7 @@ export const previewTracks: Track[] = [
 export const previewStatus: EngineStatus = {
   state: "ready",
   engine_installed: true,
+  lyric_writer: "llama3.2:3b",
   models: {
     lm: ["acestep-5Hz-lm-1.7B-Q8_0.gguf"],
     embedding: ["Qwen3-Embedding-0.6B-Q8_0.gguf"],

@@ -81,6 +81,10 @@ export interface EngineStatus {
   /** False when no engine has been built or bundled — generation is
    *  unavailable, but the library, player and export all still work. */
   engine_installed: boolean;
+  /** Local instruct model writing the lyrics, or null when none is reachable.
+   *  Without one the music model writes the words from its own rewritten
+   *  description, so they are usually not about what was asked for. */
+  lyric_writer: string | null;
   models: AvailableModels;
   models_complete: boolean;
   supports_stems: boolean;

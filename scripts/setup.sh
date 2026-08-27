@@ -75,6 +75,16 @@ fi
 
 echo "    ok"
 
+# Not a build dependency, so this never blocks — but finding out from a finished
+# song that the lyrics are about the wrong subject is a bad way to learn it.
+if ! curl -sf --max-time 2 http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+    echo "==> note: no lyric writer found"
+    echo "    Aria writes lyrics with a small local model through Ollama. Without"
+    echo "    one it still makes songs, but the words usually aren't about what"
+    echo "    you asked for. See the README."
+    echo "      ollama pull llama3.2:3b     # ~2 GB, stays on this computer"
+fi
+
 echo "==> installing frontend dependencies"
 npm ci --silent 2>/dev/null || npm install --silent || exit 1
 

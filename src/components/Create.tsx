@@ -22,10 +22,12 @@ interface Props {
   /** Voices the user has saved and named. */
   personas: Persona[];
   onPersonasChanged: () => void;
+  /** Instruct model writing the lyrics, or null when none is reachable. */
+  lyricWriter: string | null;
 }
 
 export default function Create({
-  onCreated, engineReady, tracks, personas, onPersonasChanged,
+  onCreated, engineReady, tracks, personas, onPersonasChanged, lyricWriter,
 }: Props) {
   const [prompt, setPrompt] = useState("");
   const [instrumental, setInstrumental] = useState(false);
@@ -198,6 +200,24 @@ export default function Create({
             aria-valuetext={formatMinutes(duration)}
           />
         </div>
+
+        {!instrumental && !lyricWriter && (
+          <div className="notice notice-warn" role="status">
+            <strong>The words may not be about what you asked for.</strong>
+            <p>
+              Aria writes lyrics with a small language model running on this
+              computer, and it can't find one. Without it the music model makes
+              the words up from its own description of the sound — they usually
+              aren't about your subject, and sometimes come out in another
+              language. The music itself is unaffected.
+            </p>
+            <p>
+              Install <strong>Ollama</strong> and run{" "}
+              <code>ollama pull llama3.2:3b</code> (about 2 GB, stays on this
+              computer), then start a new song.
+            </p>
+          </div>
+        )}
 
         {!instrumental && (
           <div className="field">

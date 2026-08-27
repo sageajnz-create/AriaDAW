@@ -139,6 +139,31 @@ that expectation honestly rather than appearing to hang.
 `lego` deserves attention — adding a named instrument layer to existing audio is a
 genuinely DAW-shaped capability that Suno has no equivalent for.
 
+### Lyrics come from a second, general model
+
+ACE-Step's own language model emits audio codes, not words. Asked to write
+lyrics it produced 13% distinct lines ("I talk talk talk talk talk"), drifted
+into languages nobody asked for, and often produced only vocalisations.
+
+So lyrics come from a small instruct model over Ollama (`llama3.2:3b`), which
+also expands the user's style request into a caption the DiT can use. Both
+matter, and they are one mechanism: `use_cot_caption=false` locks the caption to
+the user's own words, but the caption is *what the lyric generator writes from*,
+so locking it without supplying a rich replacement collapses the lyrics.
+
+Measured three ways on one prompt, same seed:
+
+| | caption rewritten (no Ollama) | caption locked, no Ollama | Ollama present |
+|---|---|---|---|
+| User's words survive | no | yes | yes |
+| Distinct lyric lines | 24/36 | **1/32** ("Siri" ×32) | 12/16 |
+| About the subject | no | no | yes |
+| Language drift | yes (Hindi) | — | none |
+
+The middle column is why this dependency cannot simply be removed. It is
+optional in the sense that Aria runs without it, and load-bearing in the sense
+that the result is a materially worse product — so the UI says so up front.
+
 ### Library data model
 
 Tracks carry `parent_id` + `operation`, giving every song a **lineage tree** — the cover
