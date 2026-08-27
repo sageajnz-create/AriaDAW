@@ -1034,16 +1034,29 @@ fn run_derive(
         }
     }
 
-    // Replay the cached latent when we have it and skip a VAE encode.
-    let latent = source
-        .latent_path
-        .as_ref()
-        .and_then(|p| std::fs::read(p).ok());
+    // Replay the cached latent when we have it and skip a VAE encode — except
+    // for the tasks that a latent quietly breaks. See `needs_audio_source`.
+    let mut latent = if op.needs_audio_source() {
+        None
+    } else {
+        source
+            .latent_path
+            .as_ref()
+            .and_then(|p| std::fs::read(p).ok())
+    };
     let audio = if latent.is_none() {
         std::fs::read(&source.audio_path).ok()
     } else {
         None
     };
+    // If the audio has gone from disk, a latent is worth more than refusing:
+    // a poor stem beats no stem, and the engine needs one of the two.
+    if audio.is_none() && latent.is_none() {
+        latent = source
+            .latent_path
+            .as_ref()
+            .and_then(|p| std::fs::read(p).ok());
+    }
 
     let job = ace.submit_synth_with_source(
         &req,

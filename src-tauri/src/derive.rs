@@ -88,6 +88,24 @@ impl Operation {
         matches!(self, Operation::Stem { .. } | Operation::AddLayer { .. })
     }
 
+    /// Whether this task has to be handed the decoded audio rather than a
+    /// cached latent.
+    ///
+    /// Replaying the latent the engine already produced skips a VAE encode, and
+    /// for `cover` and `repaint` that is free. For the stem tasks it is not:
+    /// measured on one 149s track, `extract` and `lego` given a cached latent
+    /// returned a near-copy of their input — a -41 dB residual against the
+    /// source, where a `cover` that genuinely restyles the track sits at
+    /// -21 dB. Handed the audio instead, the same requests came back at -20 dB.
+    /// Two stems taken this way were even more alike than either was to the
+    /// mix, which is not something isolation can produce.
+    ///
+    /// So these two pay for the encode. The same operations need the SFT model,
+    /// but for an unrelated reason, so they get their own predicate.
+    pub fn needs_audio_source(&self) -> bool {
+        matches!(self, Operation::Stem { .. } | Operation::AddLayer { .. })
+    }
+
     pub fn task_type(&self) -> &'static str {
         match self {
             Operation::Stem { .. } => "extract",
@@ -117,6 +135,37 @@ pub fn stem_choices() -> Vec<StemChoice> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A cached latent silently turns stem isolation into a copy of the input.
+    #[test]
+    fn the_stem_tasks_ask_for_audio_rather_than_a_cached_latent() {
+        assert!(Operation::Stem {
+            track: "vocals".into()
+        }
+        .needs_audio_source());
+        assert!(Operation::AddLayer {
+            track: "guitar".into(),
+            caption: None
+        }
+        .needs_audio_source());
+    }
+
+    // Everything else keeps the encode-skipping shortcut.
+    #[test]
+    fn the_other_tasks_still_replay_the_latent() {
+        assert!(!Operation::Cover {
+            caption: "jazz".into(),
+            strength: 0.6
+        }
+        .needs_audio_source());
+        assert!(!Operation::Repaint {
+            start: 0.0,
+            end: 10.0,
+            caption: None
+        }
+        .needs_audio_source());
+        assert!(!Operation::Extend { seconds: 20.0 }.needs_audio_source());
+    }
 
     #[test]
     fn titles_describe_the_derivation() {
