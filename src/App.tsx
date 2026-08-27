@@ -106,10 +106,16 @@ export default function App() {
       await refreshPersonas();
       api.videoSupport().then(setVideoSupport).catch(() => {});
       setCanPlayAudio(await api.audioOutputAvailable());
-      try {
-        await api.startEngine();
-      } catch (e) {
-        setBootError(String(e));
+      // Same reasoning as the models check above: starting an engine that was
+      // never built fails in a way that looks like a crash. The footer says so
+      // plainly instead.
+      const st = await api.engineStatus().catch(() => null);
+      if (st?.engine_installed !== false) {
+        try {
+          await api.startEngine();
+        } catch (e) {
+          setBootError(String(e));
+        }
       }
       await refreshStatus();
     })();
@@ -156,6 +162,7 @@ export default function App() {
   );
 
   const ready = status?.state === "ready";
+  const engineMissing = status?.engine_installed === false;
   const modelsMissing = status && !status.models_complete;
 
   return (
@@ -322,11 +329,13 @@ export default function App() {
               }
               aria-hidden="true"
             />
-            {ready
-              ? "Engine ready"
-              : status?.state === "starting"
-                ? "Engine starting…"
-                : "Engine stopped"}
+            {engineMissing
+              ? "No engine installed — your songs still play"
+              : ready
+                ? "Engine ready"
+                : status?.state === "starting"
+                  ? "Engine starting…"
+                  : "Engine stopped"}
           </span>
 
           {status?.cpu_fallback && <span>Using CPU rendering</span>}

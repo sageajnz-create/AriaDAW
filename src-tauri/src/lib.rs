@@ -40,6 +40,9 @@ pub struct AppState {
 #[derive(Debug, Serialize)]
 pub struct EngineStatus {
     state: EngineState,
+    /// False when no engine binary has been built or bundled. The rest of the
+    /// app still works; only generation is unavailable.
+    engine_installed: bool,
     models: AvailableModels,
     models_complete: bool,
     supports_stems: bool,
@@ -197,6 +200,7 @@ async fn engine_status(state: State<'_, Arc<AppState>>) -> Result<EngineStatus, 
         let models = eng.paths.available_models().unwrap_or_default();
         EngineStatus {
             state: eng.state(),
+            engine_installed: eng.paths.engine_installed(),
             models_complete: models.is_complete(),
             supports_stems: models.supports_stems(),
             models,
@@ -1667,8 +1671,16 @@ pub fn run() {
             let settings_path = data_dir.join("engine.json");
             let settings = load_settings(&settings_path);
 
-            let paths = EnginePaths::discover(app.path().resource_dir().ok().as_deref())
-                .map_err(|e| format!("{e}"))?;
+            // Never fatal: a first run has no weights and a source checkout may
+            // have no engine, and both of those are states the setup screen is
+            // there to fix. Failing here would hide it.
+            let paths = EnginePaths::discover(app.path().resource_dir().ok().as_deref(), &data_dir);
+            if !paths.engine_installed() {
+                eprintln!(
+                    "[engine] not installed — generation is unavailable. \
+                     Build it with: ./scripts/setup.sh --engine"
+                );
+            }
             let library = Arc::new(Mutex::new(Library::open(&data_dir, &audio_dir)?));
 
             // Audio plays over loopback HTTP; see audio_server.rs for why every

@@ -78,6 +78,9 @@ export type EngineState = "stopped" | "starting" | "ready" | "crashed";
 
 export interface EngineStatus {
   state: EngineState;
+  /** False when no engine has been built or bundled — generation is
+   *  unavailable, but the library, player and export all still work. */
+  engine_installed: boolean;
   models: AvailableModels;
   models_complete: boolean;
   supports_stems: boolean;

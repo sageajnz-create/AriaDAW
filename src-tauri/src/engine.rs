@@ -31,6 +31,17 @@ pub const CHUNK_LADDER: &[u32] = &[256, 192, 128, 64];
 /// first-run driver crash loses the user permanently, and it costs us nothing.
 pub const DEFAULT_CHUNK: u32 = 128;
 
+/// Marker written into the stand-in engine that `scripts/setup.sh` stages when
+/// no real one has been built.
+///
+/// `tauri.conf.json` names the engine as an `externalBin`, and tauri-build
+/// refuses to build at all when that file is absent — so a checkout without an
+/// engine can't even run the tests. The placeholder exists to satisfy that, and
+/// Tauri then helpfully copies it next to the binary, exactly where `discover`
+/// looks. Recognising it here is what stops the app reporting a working engine
+/// it does not have. `scripts/setup.sh` writes the same string.
+const PLACEHOLDER_MARKER: &[u8] = b"aria-dev-placeholder";
+
 const HOST: &str = "127.0.0.1";
 const PORT: u16 = 8422;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(120);
@@ -55,17 +66,60 @@ impl Default for EngineSettings {
     }
 }
 
+/// Whether a directory actually holds model weights, as opposed to merely
+/// existing. The engine build creates an empty `models/`, which must not be
+/// mistaken for a completed download.
+fn has_weights(dir: &PathBuf) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    entries.flatten().any(|e| {
+        e.path()
+            .extension()
+            .is_some_and(|x| x.eq_ignore_ascii_case("gguf"))
+    })
+}
+
+/// Whether this file is the stand-in from `scripts/setup.sh` rather than a real
+/// engine. Only the head is read: a real engine is tens of megabytes.
+fn is_placeholder(path: &Path) -> bool {
+    use std::io::Read;
+    let Ok(mut f) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut head = [0u8; 256];
+    let Ok(n) = f.read(&mut head) else {
+        return false;
+    };
+    head[..n]
+        .windows(PLACEHOLDER_MARKER.len())
+        .any(|w| w == PLACEHOLDER_MARKER)
+}
+
 /// Filesystem locations the engine needs. Resolved once at startup.
 #[derive(Debug, Clone)]
 pub struct EnginePaths {
-    pub server_bin: PathBuf,
+    /// The built engine, if there is one yet. `None` is a normal state, not an
+    /// error — see `discover`.
+    pub server_bin: Option<PathBuf>,
+    /// Where the weights live. Named whether or not it exists yet, because the
+    /// downloader's whole job is to create it.
     pub models_dir: PathBuf,
 }
 
 impl EnginePaths {
-    /// Look for a built engine in the places it can legitimately live: next to the
-    /// app (installed), or in the repo's `engine/` tree (development).
-    pub fn discover(app_dir: Option<&Path>) -> Result<Self> {
+    /// Work out where the engine and the weights belong.
+    ///
+    /// This deliberately cannot fail. On a first run there are no weights —
+    /// they are several gigabytes and the app downloads them from its own setup
+    /// screen — and in a source checkout there is no engine until
+    /// `scripts/setup.sh --engine` builds one. Treating either as fatal is what
+    /// made the app die during startup, taking with it the setup screen that
+    /// exists to resolve exactly that situation.
+    ///
+    /// Callers ask `server_bin` whether generation is possible; everything else
+    /// — library, player, export — works without it.
+    pub fn discover(app_dir: Option<&Path>, data_dir: &Path) -> Self {
         let mut roots: Vec<PathBuf> = Vec::new();
         if let Some(d) = app_dir {
             roots.push(d.to_path_buf());
@@ -75,33 +129,73 @@ impl EnginePaths {
             roots.push(cwd.join("engine/acestep.cpp"));
             roots.push(cwd.join("../engine/acestep.cpp"));
         }
+        Self::from_roots(&roots, data_dir)
+    }
 
-        for root in &roots {
+    /// The search itself, over roots the caller supplies.
+    ///
+    /// Split out so tests can be hermetic: `discover` reaches into the current
+    /// directory, which means a developer who has actually built an engine gets
+    /// different results from one who hasn't — the "no engine here" tests found
+    /// the real checkout and failed the moment the engine existed.
+    fn from_roots(roots: &[PathBuf], data_dir: &Path) -> Self {
+        let mut server_bin = None;
+        'search: for root in roots {
             // build-static first: that's what packaging produces, and the only
             // one that runs without ggml shared libraries sitting beside it.
-            let bin = root.join("build-static/ace-server");
-            let shared = root.join("build/ace-server");
-            let alt = root.join("ace-server");
-            let models = root.join("models");
-            for candidate in [bin, shared, alt] {
-                if candidate.is_file() && models.is_dir() {
-                    return Ok(Self {
-                        server_bin: candidate,
-                        models_dir: models,
-                    });
+            for name in ["build-static/ace-server", "build/ace-server", "ace-server"] {
+                let candidate = root.join(name);
+                if candidate.is_file() && !is_placeholder(&candidate) {
+                    server_bin = Some(candidate);
+                    break 'search;
                 }
             }
         }
-        Err(anyhow!(
-            "Could not find the Aria engine. Expected ace-server and a models/ \
-             directory under engine/acestep.cpp."
-        ))
+
+        Self {
+            server_bin,
+            models_dir: Self::models_dir(roots, data_dir),
+        }
+    }
+
+    /// Where the weights live.
+    ///
+    /// Deliberately independent of where — or whether — the engine was found.
+    /// This is ten-plus gigabytes the user waited on, so it must not move when
+    /// the engine gets built, and it must not sit under `target/`, where a
+    /// `cargo clean` would silently delete it.
+    fn models_dir(roots: &[PathBuf], data_dir: &Path) -> PathBuf {
+        // An explicit override, so a second checkout or a test can point at a
+        // download that already exists rather than repeating it.
+        if let Some(dir) = std::env::var_os("ARIA_MODELS_DIR") {
+            return PathBuf::from(dir);
+        }
+
+        // A populated `models/` beside the engine wins, because that is where
+        // `engine/fetch-models.sh` puts them and where existing checkouts
+        // already have them. Emptiness matters: an empty directory is the
+        // engine build having created one, not weights being present.
+        if let Some(existing) = roots.iter().map(|r| r.join("models")).find(has_weights) {
+            return existing;
+        }
+
+        data_dir.join("models")
+    }
+
+    /// Whether a built engine is present. Generation needs one; nothing else does.
+    pub fn engine_installed(&self) -> bool {
+        self.server_bin.is_some()
     }
 
     /// Which model files are actually present. Drives what the UI offers, so we
     /// never show a feature the user's install can't perform.
     pub fn available_models(&self) -> Result<AvailableModels> {
         let mut m = AvailableModels::default();
+        // Absent until the first download finishes. That is "no models", not a
+        // failure to look.
+        if !self.models_dir.is_dir() {
+            return Ok(m);
+        }
         for entry in std::fs::read_dir(&self.models_dir)? {
             let name = entry?.file_name().to_string_lossy().to_string();
             if !name.ends_with(".gguf") {
@@ -278,8 +372,17 @@ impl Engine {
         *self.state.lock().unwrap() = EngineState::Starting;
         self.log_tail.lock().unwrap().clear();
 
+        let Some(server_bin) = self.paths.server_bin.clone() else {
+            *self.state.lock().unwrap() = EngineState::Stopped;
+            return Err(anyhow!(
+                "The Aria engine isn't installed yet, so songs can't be \
+                 generated. Everything already in your library still works. \
+                 Build it with: ./scripts/setup.sh --engine"
+            ));
+        };
+
         let overlap = (self.settings.vae_chunk / 8).max(8);
-        let mut cmd = Command::new(&self.paths.server_bin);
+        let mut cmd = Command::new(&server_bin);
         cmd.arg("--models")
             .arg(&self.paths.models_dir)
             .arg("--host")
@@ -334,10 +437,10 @@ impl Engine {
                 // Only meaningful when the spawning thread is the process's
                 // main thread; otherwise that thread can retire long before the
                 // app does and take the engine with it.
-                if spawning_tid == libc::getpid() {
-                    if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 {
-                        return Err(std::io::Error::last_os_error());
-                    }
+                if spawning_tid == libc::getpid()
+                    && libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0
+                {
+                    return Err(std::io::Error::last_os_error());
                 }
                 // Put the child in its own process group so a Ctrl-C to the
                 // terminal doesn't race our own shutdown handling.
@@ -346,12 +449,9 @@ impl Engine {
             });
         }
 
-        let mut child = cmd.spawn().with_context(|| {
-            format!(
-                "failed to launch engine at {}",
-                self.paths.server_bin.display()
-            )
-        })?;
+        let mut child = cmd
+            .spawn()
+            .with_context(|| format!("failed to launch engine at {}", server_bin.display()))?;
 
         // Drain stderr into a ring buffer. Without this the pipe fills and the
         // engine blocks mid-generation.
@@ -494,5 +594,152 @@ impl Engine {
 impl Drop for Engine {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scratch() -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("aria-engine-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn fake_engine(root: &Path, rel: &str) {
+        let bin = root.join(rel);
+        std::fs::create_dir_all(bin.parent().unwrap()).unwrap();
+        std::fs::write(&bin, b"#!/bin/sh\nexit 0\n").unwrap();
+    }
+
+    // The bug this guards: `discover` used to require a models directory as
+    // well as a binary, so a first run — which by definition has no weights yet
+    // — failed, and the failure aborted startup before the setup screen that
+    // downloads them could ever appear.
+    #[test]
+    fn an_engine_is_found_before_any_models_have_been_downloaded() {
+        let root = scratch();
+        let data = scratch();
+        fake_engine(&root, "build-static/ace-server");
+
+        let paths = EnginePaths::from_roots(std::slice::from_ref(&root), &data);
+
+        assert!(paths.engine_installed());
+        assert_eq!(paths.models_dir, data.join("models"));
+        assert!(!paths.models_dir.exists(), "nothing should be created here");
+    }
+
+    #[test]
+    fn a_checkout_with_no_engine_still_resolves_somewhere_to_download_into() {
+        let root = scratch();
+        let data = scratch();
+
+        let paths = EnginePaths::from_roots(std::slice::from_ref(&root), &data);
+
+        assert!(!paths.engine_installed());
+        assert_eq!(paths.models_dir, data.join("models"));
+    }
+
+    #[test]
+    fn a_missing_models_directory_reads_as_no_models_rather_than_an_error() {
+        let root = scratch();
+        let data = scratch();
+        fake_engine(&root, "build-static/ace-server");
+
+        let models = EnginePaths::from_roots(std::slice::from_ref(&root), &data)
+            .available_models()
+            .unwrap();
+
+        assert!(models.lm.is_empty());
+        assert!(!models.is_complete());
+    }
+
+    // build-static is the only build that runs without ggml shared libraries
+    // beside it, so it has to win when both are present.
+    #[test]
+    fn the_static_build_is_preferred_over_the_shared_one() {
+        let root = scratch();
+        let data = scratch();
+        fake_engine(&root, "build/ace-server");
+        fake_engine(&root, "build-static/ace-server");
+
+        let paths = EnginePaths::from_roots(std::slice::from_ref(&root), &data);
+
+        assert_eq!(paths.server_bin, Some(root.join("build-static/ace-server")));
+    }
+
+    // tauri-build needs *some* file at the externalBin path, and Tauri copies
+    // whatever is there next to the app — right where `discover` looks. Without
+    // this check the app reports a working engine and then fails at the point
+    // the user asks for a song.
+    #[test]
+    fn the_stand_in_engine_is_not_mistaken_for_a_real_one() {
+        let root = scratch();
+        let data = scratch();
+        let bin = root.join("ace-server");
+        std::fs::write(&bin, b"#!/bin/sh\n# aria-dev-placeholder\nexit 1\n").unwrap();
+
+        let paths = EnginePaths::from_roots(std::slice::from_ref(&root), &data);
+
+        assert!(!paths.engine_installed());
+    }
+
+    // The weights are a ten-gigabyte download the user waited on. Building the
+    // engine afterwards must not move the goalposts and ask for them again.
+    #[test]
+    fn building_the_engine_does_not_change_where_the_weights_live() {
+        let root = scratch();
+        let data = scratch();
+
+        let before = EnginePaths::from_roots(std::slice::from_ref(&root), &data).models_dir;
+        fake_engine(&root, "build-static/ace-server");
+        let after = EnginePaths::from_roots(std::slice::from_ref(&root), &data).models_dir;
+
+        assert_eq!(before, after);
+    }
+
+    // `engine/fetch-models.sh` downloads beside the engine, and existing
+    // checkouts already have them there.
+    #[test]
+    fn weights_already_sitting_beside_the_engine_are_used_where_they_are() {
+        let root = scratch();
+        let data = scratch();
+        fake_engine(&root, "build-static/ace-server");
+        std::fs::create_dir_all(root.join("models")).unwrap();
+        std::fs::write(root.join("models/vae-BF16.gguf"), b"x").unwrap();
+
+        let paths = EnginePaths::from_roots(std::slice::from_ref(&root), &data);
+
+        assert_eq!(paths.models_dir, root.join("models"));
+    }
+
+    // The engine build creates an empty models/. That is not a download.
+    #[test]
+    fn an_empty_models_directory_does_not_count_as_having_the_weights() {
+        let root = scratch();
+        let data = scratch();
+        fake_engine(&root, "build-static/ace-server");
+        std::fs::create_dir_all(root.join("models")).unwrap();
+
+        let paths = EnginePaths::from_roots(std::slice::from_ref(&root), &data);
+
+        assert_eq!(paths.models_dir, data.join("models"));
+    }
+
+    // Starting is what should fail when there's no engine — not startup, and
+    // not with a message about paths.
+    #[test]
+    fn starting_without_an_engine_explains_itself_instead_of_panicking() {
+        let root = scratch();
+        let data = scratch();
+        let mut engine = EnginePaths::from_roots(std::slice::from_ref(&root), &data);
+        engine.models_dir = root.join("models");
+        let mut engine = Engine::new(engine, EngineSettings::default());
+
+        let err = engine.start().unwrap_err().to_string();
+
+        assert!(err.contains("isn't installed"), "{err}");
+        assert_eq!(engine.state(), EngineState::Stopped);
     }
 }

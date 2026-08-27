@@ -40,6 +40,16 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      # The crate embeds the built frontend via `generate_context!` and names
+      # the engine as an externalBin, so neither `cargo test` nor `cargo clippy`
+      # can run until both exist. setup.sh puts them there.
+      - name: Bootstrap (frontend build + engine placeholder)
+        shell: bash
+        run: ./scripts/setup.sh
       - name: Format
         working-directory: src-tauri
         run: cargo fmt --check
