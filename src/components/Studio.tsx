@@ -104,11 +104,11 @@ export default function Studio({
 
       <div className="grid-2">
         <div className="field">
-          <label htmlFor="bpm">
-            Tempo {values.bpm > 0 ? `— ${values.bpm} BPM` : "— Aria decides"}
+          <label htmlFor="tempo">
+            Tempo {values.bpm > 0 ? `— ${values.bpm} beats per minute` : "— Aria decides"}
           </label>
           <input
-            id="bpm"
+            id="tempo"
             type="range"
             min={0}
             max={200}
@@ -265,7 +265,7 @@ export default function Studio({
                   <div key={p.id} className="persona-row">
                     <span className="persona-name">{p.name}</span>
                     <span className="persona-meta">
-                      {p.bpm ? `${p.bpm} BPM` : ""}
+                      {p.bpm ? `${p.bpm} beats per minute` : ""}
                       {p.bpm && p.keyscale ? " · " : ""}
                       {p.keyscale ?? ""}
                     </span>

@@ -1,4 +1,5 @@
 import { formatDuration, trackArtUrl } from "../api";
+import { formatTempo } from "../a11y";
 import { isDesktop } from "../preview";
 import type { Player } from "../player";
 import FollowAlong from "./FollowAlong";
@@ -24,7 +25,11 @@ export default function PlayerBar({ player }: Props) {
     !!current && !!current.lyrics && current.lyrics.trim() !== "[Instrumental]";
 
   return (
-    <div className={"player" + (current ? "" : " player-idle")}>
+    <div
+      className={"player" + (current ? "" : " player-idle")}
+      role="region"
+      aria-label={current ? "Now playing" : undefined}
+    >
       {/* Not `controls`: the visible transport below is the interface, and two
           sets of controls would give screen readers two ways to fight. */}
       <audio ref={player.audioRef} preload="metadata" />
@@ -40,7 +45,7 @@ export default function PlayerBar({ player }: Props) {
               {current.title}
             </p>
             <p className="player-meta">
-              {current.bpm ? `${current.bpm} BPM` : " "}
+              {formatTempo(current.bpm) ?? "\u00a0"}
               {current.keyscale ? ` · ${current.keyscale}` : ""}
               {player.remaining > 0 ? ` · ${player.remaining} more queued` : ""}
             </p>
@@ -78,7 +83,7 @@ export default function PlayerBar({ player }: Props) {
           </div>
 
           <div className="player-seek">
-            <span className="player-clock">{formatDuration(position)}</span>
+            <span className="player-clock" aria-hidden="true">{formatDuration(position)}</span>
             <input
               type="range"
               className="seek"
@@ -90,7 +95,7 @@ export default function PlayerBar({ player }: Props) {
               aria-label="Position in the song"
               aria-valuetext={`${formatDuration(position)} of ${formatDuration(total)}`}
             />
-            <span className="player-clock">{formatDuration(total)}</span>
+            <span className="player-clock" aria-hidden="true">{formatDuration(total)}</span>
           </div>
 
           <div className="player-modes">
@@ -100,6 +105,11 @@ export default function PlayerBar({ player }: Props) {
               onClick={() => setWordsOpen((v) => !v)}
               aria-expanded={singable ? wordsOpen : undefined}
               aria-controls="follow-along"
+              aria-label={
+                singable
+                  ? "Follow the words while it plays"
+                  : "Follow the words — this song has no lyrics"
+              }
               disabled={!singable}
               title="Follow the words while it plays"
             >
@@ -110,17 +120,26 @@ export default function PlayerBar({ player }: Props) {
               className="btn btn-icon"
               onClick={player.toggleShuffle}
               aria-pressed={player.shuffle}
+              aria-label={player.shuffle ? "Shuffle on" : "Shuffle off"}
               title="Play in a random order"
             >
-              🔀 {player.shuffle ? "On" : "Off"}
+              Shuffle {player.shuffle ? "on" : "off"}
             </button>
             <button
               type="button"
               className="btn btn-icon"
               onClick={player.cycleRepeat}
+              aria-label={
+                player.repeat === "off"
+                  ? "Repeat off"
+                  : player.repeat === "all"
+                    ? "Repeat all songs"
+                    : "Repeat this song"
+              }
               title="Repeat"
             >
-              🔁 {player.repeat === "off" ? "Off" : player.repeat === "all" ? "All" : "One"}
+              Repeat{" "}
+              {player.repeat === "off" ? "off" : player.repeat === "all" ? "all" : "this song"}
             </button>
             <label className="player-volume">
               <span className="sr-only">Volume</span>

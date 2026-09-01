@@ -1,4 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import {
+  listKeyIntent,
+  moveIndex,
+  setupFinished,
+  setupProgressKey,
+  setupProgressMessage,
+  useAnnounce,
+} from "../a11y";
 import { api, onEvent } from "../api";
 import type { SetupInfo, SetupProgress, Tier } from "../types";
 
@@ -28,6 +36,9 @@ export default function Setup({ onReady }: Props) {
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<SetupProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const announce = useAnnounce();
+  const announcedFile = useRef<string | null>(null);
+  const tierButtons = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => {
     api.setupInfo(tier ?? undefined).then((i) => {
@@ -38,10 +49,18 @@ export default function Setup({ onReady }: Props) {
 
   useEffect(() => {
     const offs = [
-      onEvent<SetupProgress>("setup:progress", setProgress),
+      onEvent<SetupProgress>("setup:progress", (p) => {
+        setProgress(p);
+        const key = setupProgressKey(p.role, p.file_index);
+        if (key !== announcedFile.current) {
+          announcedFile.current = key;
+          announce(setupProgressMessage(p.role, p.file_index, p.file_count));
+        }
+      }),
       onEvent<Record<string, never>>("setup:done", () => {
         setBusy(false);
         setProgress(null);
+        announce(setupFinished());
         onReady();
       }),
       onEvent<{ message: string }>("setup:error", (p) => {
@@ -52,12 +71,14 @@ export default function Setup({ onReady }: Props) {
     return () => {
       offs.forEach((o) => o.then((f) => f()));
     };
-  }, [onReady]);
+  }, [onReady, announce]);
 
   async function start() {
     if (!tier) return;
     setError(null);
     setBusy(true);
+    announcedFile.current = null;
+    announce("Starting the download.");
     try {
       await api.downloadModels(tier);
     } catch (e) {
@@ -91,9 +112,9 @@ export default function Setup({ onReady }: Props) {
       {!busy && (
         <>
           <div className="field">
-            <label htmlFor="tier">How much should Aria download?</label>
-            <div className="tier-list" role="radiogroup" aria-label="Download size">
-              {TIERS.map((t) => {
+            <label id="tier-label">How much should Aria download?</label>
+            <div className="tier-list" role="radiogroup" aria-labelledby="tier-label" id="tier">
+              {TIERS.map((t, i) => {
                 const selected = tier === t;
                 const isSuggested = info.tier === t;
                 return (
@@ -102,8 +123,18 @@ export default function Setup({ onReady }: Props) {
                     type="button"
                     role="radio"
                     aria-checked={selected}
+                    tabIndex={selected ? 0 : -1}
+                    ref={(el) => { tierButtons.current[i] = el; }}
                     className={`tier${selected ? " tier-on" : ""}`}
                     onClick={() => setTier(t)}
+                    onKeyDown={(e) => {
+                      const intent = listKeyIntent(e.key);
+                      if (!intent) return;
+                      e.preventDefault();
+                      const next = moveIndex(i, TIERS.length, intent);
+                      setTier(TIERS[next]);
+                      tierButtons.current[next]?.focus();
+                    }}
                   >
                     <span className="tier-name">
                       {t === "light" ? "Light" : t === "standard" ? "Standard" : "Best"}
@@ -157,42 +188,41 @@ export default function Setup({ onReady }: Props) {
         </>
       )}
 
-      {/* Announced politely so progress is audible, not just visible. */}
-      <div aria-live="polite" aria-atomic="true">
-        {busy && (
-          <div className="progress">
-            <div className="progress-head">
-              <span className="pulse" aria-hidden="true" />
-              <span>
-                {progress
-                  ? `Getting the ${progress.role} (${progress.file_index + 1} of ${progress.file_count})`
-                  : "Starting the download"}
-              </span>
-            </div>
-            {progress && (
-              <>
-                <div
-                  className="bar"
-                  role="progressbar"
-                  aria-valuenow={pct}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-label="Download progress"
-                >
-                  <div className="bar-fill" style={{ width: `${pct}%` }} />
-                </div>
-                <p className="progress-detail">
-                  {gb(progress.downloaded)} of {gb(progress.total)} — {pct}%
-                </p>
-              </>
-            )}
-            <p className="progress-elapsed">
-              You can leave this running. If it stops, reopening Aria continues
-              from where it got to.
-            </p>
+      {/* Visual progress. Byte counts update too often to announce; the live
+          region only speaks when the file being fetched changes. */}
+      {busy && (
+        <div className="progress">
+          <div className="progress-head">
+            <span className="pulse" aria-hidden="true" />
+            <span>
+              {progress
+                ? `Getting the ${progress.role} (${progress.file_index + 1} of ${progress.file_count})`
+                : "Starting the download"}
+            </span>
           </div>
-        )}
-      </div>
+          {progress && (
+            <>
+              <div
+                className="bar"
+                role="progressbar"
+                aria-valuenow={pct}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-label="Download progress"
+              >
+                <div className="bar-fill" style={{ width: `${pct}%` }} />
+              </div>
+              <p className="progress-detail">
+                {gb(progress.downloaded)} of {gb(progress.total)} — {pct}%
+              </p>
+            </>
+          )}
+          <p className="progress-elapsed">
+            You can leave this running. If it stops, reopening Aria continues
+            from where it got to.
+          </p>
+        </div>
+      )}
 
       {error && (
         <div className="notice notice-err" role="alert">

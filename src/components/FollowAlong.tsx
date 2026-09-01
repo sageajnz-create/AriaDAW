@@ -42,8 +42,9 @@ export default function FollowAlong({ track, position }: Props) {
       <div
         ref={scroller}
         className="follow-scroll"
-        role="group"
+        role="region"
         aria-label={`Words in ${track.title}, approximately timed`}
+        aria-live="off"
         tabIndex={0}
       >
         {timeline.entries.map((entry, i) => {

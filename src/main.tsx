@@ -2,6 +2,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import ErrorBoundary from "./ErrorBoundary";
+import { Announcer } from "./a11y";
 import { installRepaintOnRestore } from "./repaint";
 import { reportError } from "./api";
 import "./styles.css";
@@ -48,7 +49,9 @@ window.addEventListener("unhandledrejection", (e) => {
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <ErrorBoundary>
-      <App />
+      <Announcer>
+        <App />
+      </Announcer>
     </ErrorBoundary>
   </React.StrictMode>,
 );

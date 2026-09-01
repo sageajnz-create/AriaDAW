@@ -1,8 +1,19 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import Create from "./components/Create";
 import LibraryView from "./components/Library";
 import PlayerBar from "./components/Player";
 import Setup from "./components/Setup";
+import {
+  coalesceAnnouncement,
+  deriveFinished,
+  generationFinished,
+  generationProgress,
+  listKeyIntent,
+  loadLargeText,
+  moveIndex,
+  saveLargeText,
+  useAnnounce,
+} from "./a11y";
 import { api, loadAudioBase, onEvent, openFolder, pickAudioFile } from "./api";
 import { usePlayer } from "./player";
 import { isDesktop } from "./preview";
@@ -20,7 +31,16 @@ export default function App() {
   const [videoSupport, setVideoSupport] = useState<VideoSupport | null>(null);
   const [status, setStatus] = useState<EngineStatus | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
-  const [largeText, setLargeText] = useState(false);
+  const [largeText, setLargeText] = useState(loadLargeText);
+  const announce = useAnnounce();
+  const tabRefs = useRef<Record<Tab, HTMLButtonElement | null>>({
+    create: null,
+    library: null,
+  });
+  // After a song lands we move keyboard focus to My songs, because Create
+  // unmounts and the button they just pressed is gone.
+  const focusLibrary = useRef(false);
+  const lastProgress = useRef<string | null>(null);
   const [canPlayAudio, setCanPlayAudio] = useState(true);
   // A derived track is being made; the library disables its controls meanwhile.
   const [deriving, setDeriving] = useState(false);
@@ -123,6 +143,7 @@ export default function App() {
 
   useEffect(() => {
     document.body.classList.toggle("text-large", largeText);
+    saveLargeText(largeText);
   }, [largeText]);
 
   // Derived tracks finish on the same events as generation. Refresh the list
@@ -131,15 +152,25 @@ export default function App() {
     const offs = [
       onEvent<{ stage: string; detail: string }>("gen:stage", (p) => {
         setWorking(p.detail || null);
+        const next = coalesceAnnouncement(
+          lastProgress.current,
+          generationProgress(p.stage, p.detail),
+        );
+        if (next) {
+          lastProgress.current = next;
+          announce(next);
+        }
       }),
       onEvent<{ track: Track }>("gen:track", () => {
         refreshTracks();
       }),
-      onEvent<{ track: Track }>("gen:done", () => {
+      onEvent<{ track: Track }>("gen:done", (p) => {
         setDeriving(false);
         setImporting(false);
         setWorking(null);
+        lastProgress.current = null;
         refreshTracks();
+        announce(p.track ? generationFinished(p.track.title) : deriveFinished());
       }),
       onEvent<{ message: string }>("gen:error", (p) => {
         setDeriving(false);
@@ -151,15 +182,33 @@ export default function App() {
     return () => {
       offs.forEach((o) => o.then((f) => f()));
     };
-  }, [refreshTracks]);
+  }, [refreshTracks, announce]);
 
   const onCreated = useCallback(
     (t: Track) => {
       setTracks((prev) => [t, ...prev]);
+      focusLibrary.current = true;
       setTab("library");
     },
     [],
   );
+
+  useEffect(() => {
+    if (tab !== "library" || !focusLibrary.current) return;
+    focusLibrary.current = false;
+    document.getElementById("panel-library")?.focus();
+  }, [tab, tracks]);
+
+  const tabs: Tab[] = ["create", "library"];
+
+  function onTabsKeyDown(e: KeyboardEvent) {
+    const intent = listKeyIntent(e.key);
+    if (!intent) return;
+    e.preventDefault();
+    const next = tabs[moveIndex(tabs.indexOf(tab), tabs.length, intent)];
+    setTab(next);
+    tabRefs.current[next]?.focus();
+  }
 
   const ready = status?.state === "ready";
   const engineMissing = status?.engine_installed === false;
@@ -217,14 +266,16 @@ export default function App() {
 
         {!needsSetup && (
         <>
-        <div className="tabs" role="tablist" aria-label="Sections">
+        <div className="tabs" role="tablist" aria-label="Sections" onKeyDown={onTabsKeyDown}>
           <button
             type="button"
             role="tab"
             id="tab-create"
             className="tab"
+            ref={(el) => { tabRefs.current.create = el; }}
             aria-selected={tab === "create"}
             aria-controls="panel-create"
+            tabIndex={tab === "create" ? 0 : -1}
             onClick={() => setTab("create")}
           >
             Create
@@ -234,8 +285,10 @@ export default function App() {
             role="tab"
             id="tab-library"
             className="tab"
+            ref={(el) => { tabRefs.current.library = el; }}
             aria-selected={tab === "library"}
             aria-controls="panel-library"
+            tabIndex={tab === "library" ? 0 : -1}
             onClick={() => setTab("library")}
           >
             My songs{tracks.length > 0 ? ` (${tracks.length})` : ""}
@@ -253,7 +306,7 @@ export default function App() {
           )}
 
           {!canPlayAudio && (
-            <div className="notice notice-warn">
+            <div className="notice notice-warn" role="status">
               <p>
                 <strong>Songs will play silently until one package is installed</strong>
                 Your system is missing the GStreamer plugin this app needs to send
@@ -265,7 +318,7 @@ export default function App() {
           )}
 
           {modelsMissing && (
-            <div className="notice notice-warn">
+            <div className="notice notice-warn" role="status">
               <p>
                 <strong>Some model files are missing</strong>
                 Aria needs a language model, a text encoder, a sound model and a
@@ -286,21 +339,23 @@ export default function App() {
               />
             </div>
           ) : (
-            <div role="tabpanel" id="panel-library" aria-labelledby="tab-library">
-              {/* Announced politely: the Create tab's own progress is hidden
-                  while the library is showing, so this is the only signal that
-                  more takes are still coming. */}
-              <div aria-live="polite" aria-atomic="true">
-                {working && (
-                  <div className="working-strip">
-                    <span className="pulse" aria-hidden="true" />
-                    <span>{working}</span>
-                    <span className="working-note">
-                      Songs appear here as each one finishes.
-                    </span>
-                  </div>
-                )}
-              </div>
+            <div
+              role="tabpanel"
+              id="panel-library"
+              aria-labelledby="tab-library"
+              tabIndex={-1}
+            >
+              {/* Visual only. Stage and completion are spoken by the window-level
+                  live region, which stays mounted when this panel is showing. */}
+              {working && (
+                <div className="working-strip">
+                  <span className="pulse" aria-hidden="true" />
+                  <span>{working}</span>
+                  <span className="working-note">
+                    Songs appear here as each one finishes.
+                  </span>
+                </div>
+              )}
               <LibraryView
                 tracks={tracks}
                 playlists={playlists}
@@ -322,7 +377,7 @@ export default function App() {
         <PlayerBar player={player} />
 
         <footer className="footer">
-          <span>
+          <span role="status">
             <span
               className={
                 "status-dot " +

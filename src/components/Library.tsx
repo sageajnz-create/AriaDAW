@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { formatTempo, useEscape } from "../a11y";
 import { api, formatDate, formatDuration, pickFolder, pickSaveFile, trackArtUrl } from "../api";
 import Derive from "./Derive";
 import type { Player } from "../player";
@@ -58,6 +59,9 @@ export default function Library({
   const [newName, setNewName] = useState("");
   const [makingPlaylist, setMakingPlaylist] = useState(false);
   const [renamingPlaylist, setRenamingPlaylist] = useState(false);
+
+  const dismissDelete = useCallback(() => setConfirmDelete(null), []);
+  useEscape(confirmDelete !== null, dismissDelete);
 
   const activePlaylist =
     scope.kind === "playlist" ? playlists.find((p) => p.id === scope.id) ?? null : null;
@@ -471,7 +475,7 @@ export default function Library({
                     )}
                     <p className="track-meta">
                       {formatDuration(t.duration)}
-                      {t.bpm ? ` · ${t.bpm} BPM` : ""}
+                      {formatTempo(t.bpm) ? ` · ${formatTempo(t.bpm)}` : ""}
                       {t.keyscale ? ` · ${t.keyscale}` : ""}
                       {" · "}
                       {formatDate(t.created_at)}
@@ -493,6 +497,7 @@ export default function Library({
                       className="btn btn-icon"
                       onClick={() => toggleFavorite(t)}
                       aria-pressed={t.favorite}
+                      aria-label={t.favorite ? "Remove from favourites" : "Add to favourites"}
                       title={t.favorite ? "Remove from favourites" : "Add to favourites"}
                     >
                       {/* Carries a word as well as a symbol, so the state is never
@@ -699,7 +704,7 @@ export default function Library({
                 )}
 
                 {t.missing && (
-                  <div className="notice notice-warn" style={{ marginTop: 12 }}>
+                  <div className="notice notice-warn" style={{ marginTop: 12 }} role="status">
                     <p>
                       <strong>This song's file isn't where Aria left it</strong>
                       It was renamed, moved or deleted outside the app. That's allowed —
@@ -718,7 +723,13 @@ export default function Library({
                 />
 
                 {lyricsOpen && (
-                  <div className="lyrics" id={`lyrics-${t.id}`}>
+                  <div
+                    className="lyrics"
+                    id={`lyrics-${t.id}`}
+                    role="region"
+                    aria-label={`Words of ${t.title}`}
+                    tabIndex={0}
+                  >
                     {t.lyrics}
                   </div>
                 )}
@@ -727,12 +738,31 @@ export default function Library({
                   <div
                     className="notice notice-warn"
                     role="alertdialog"
-                    aria-label="Confirm delete"
+                    aria-modal="true"
+                    aria-labelledby={`del-title-${t.id}`}
+                    aria-describedby={`del-desc-${t.id}`}
+                    onKeyDown={(e) => {
+                      if (e.key !== "Tab") return;
+                      const nodes = e.currentTarget.querySelectorAll<HTMLElement>("button");
+                      const first = nodes[0];
+                      const last = nodes[nodes.length - 1];
+                      if (!first || !last) return;
+                      if (e.shiftKey && document.activeElement === first) {
+                        e.preventDefault();
+                        last.focus();
+                      } else if (!e.shiftKey && document.activeElement === last) {
+                        e.preventDefault();
+                        first.focus();
+                      }
+                    }}
                   >
                     <div>
                       <p>
-                        <strong>Delete "{t.title}"?</strong>
-                        This removes the audio file from your computer. It can't be undone.
+                        <strong id={`del-title-${t.id}`}>Delete "{t.title}"?</strong>
+                        <span id={`del-desc-${t.id}`}>
+                          This removes the audio file from your computer. It can't be undone.
+                          There is no time limit — take as long as you need.
+                        </span>
                       </p>
                       <div className="btn-row" style={{ marginTop: 12 }}>
                         <button type="button" className="btn" onClick={() => remove(t.id)}>
@@ -741,7 +771,7 @@ export default function Library({
                         <button
                           type="button"
                           className="btn"
-                          onClick={() => setConfirmDelete(null)}
+                          onClick={dismissDelete}
                           autoFocus
                         >
                           Keep it
