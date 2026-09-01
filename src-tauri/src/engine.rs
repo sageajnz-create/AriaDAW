@@ -125,6 +125,26 @@ impl EnginePaths {
             roots.push(d.to_path_buf());
             roots.push(d.join("engine"));
         }
+        // Packaged Linux (Tauri 2): the sidecar is copied next to the app
+        // binary with the target triple stripped, i.e.
+        //   usr/bin/aria
+        //   usr/bin/ace-server
+        // `resource_dir()` is `usr/lib/Aria`, so searching only there means a
+        // .deb / AppImage / Flatpak looks like it has no engine. Always look
+        // beside the running binary too.
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
+                roots.push(dir.to_path_buf());
+            }
+        }
+        // AppImage sets APPDIR to the mounted image. Same layout as the .deb
+        // (`usr/bin/ace-server`), included so we still find it if current_exe
+        // has been resolved somewhere else.
+        if let Some(appdir) = std::env::var_os("APPDIR") {
+            let appdir = PathBuf::from(appdir);
+            roots.push(appdir.join("usr/bin"));
+            roots.push(appdir.join("usr/lib/Aria"));
+        }
         if let Ok(cwd) = std::env::current_dir() {
             roots.push(cwd.join("engine/acestep.cpp"));
             roots.push(cwd.join("../engine/acestep.cpp"));
@@ -667,6 +687,24 @@ mod tests {
         let paths = EnginePaths::from_roots(std::slice::from_ref(&root), &data);
 
         assert_eq!(paths.server_bin, Some(root.join("build-static/ace-server")));
+    }
+
+    // Packaged Linux: Tauri copies `ace-server-$triple` to `usr/bin/ace-server`
+    // (triple stripped), next to the app binary — not under `usr/lib/Aria`.
+    #[test]
+    fn a_packaged_sidecar_next_to_the_app_binary_is_found() {
+        let root = scratch();
+        let data = scratch();
+        fake_engine(&root, "ace-server");
+
+        let paths = EnginePaths::from_roots(std::slice::from_ref(&root), &data);
+
+        assert_eq!(paths.server_bin, Some(root.join("ace-server")));
+        assert_eq!(
+            paths.models_dir,
+            data.join("models"),
+            "weights still download on first run, they are not beside the binary"
+        );
     }
 
     // tauri-build needs *some* file at the externalBin path, and Tauri copies

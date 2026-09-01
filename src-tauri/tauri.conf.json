@@ -42,6 +42,11 @@
     "icon": [
       "icons/icon.png"
     ],
+    "publisher": "Aria contributors",
+    "copyright": "Copyright (c) 2026 Aria contributors",
+    "homepage": "https://github.com/sageajnz-create/AriaDAW",
+    "license": "MIT",
+    "licenseFile": "../LICENSE",
     "category": "Music",
     "shortDescription": "Free, unlimited, local AI music creation",
     "longDescription": "Aria generates complete songs with vocals entirely on your own computer. No account, no credits, no subscription. Everything you make is yours.",
@@ -51,6 +56,7 @@
     ],
     "linux": {
       "deb": {
+        "section": "sound",
         "depends": [
           "libwebkit2gtk-4.1-0",
           "libgtk-3-0",
@@ -58,7 +64,11 @@
           "gstreamer1.0-plugins-good",
           "libvulkan1",
           "mesa-vulkan-drivers"
-        ]
+        ],
+        "files": {
+          "/usr/share/metainfo/org.aria.music.metainfo.xml": "../packaging/org.aria.music.metainfo.xml",
+          "/usr/share/doc/aria/copyright": "../LICENSE"
+        }
       }
     }
   }

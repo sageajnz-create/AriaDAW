@@ -33,6 +33,15 @@ dist-ssr/
 # Phase 0 scratch output
 /output/
 
-# Sidecar staged by scripts/package.sh
+# Sidecar staged by scripts/setup.sh and scripts/package.sh
 /src-tauri/binaries/
 /src-tauri/resources/engine/
+
+# Linux package outputs (the .deb/.AppImage live under src-tauri/target/,
+# which is already ignored). Flatpak-builder's working copy of the .deb,
+# the ostree repo, and the bundled .flatpak must not be committed.
+/packaging/flatpak/aria.deb
+/packaging/flatpak/build/
+/packaging/flatpak/repo/
+/packaging/flatpak/.flatpak-builder/
+/packaging/*.flatpak
