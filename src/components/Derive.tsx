@@ -71,6 +71,8 @@ export default function Derive({
     }
   }
 
+  const panelId = `derive-panel-${track.id}`;
+
   return (
     <div className="derive">
       <div className="btn-row">
@@ -79,12 +81,10 @@ export default function Derive({
           className="btn btn-icon"
           onClick={() => setPanel(panel === "stems" ? null : "stems")}
           aria-expanded={panel === "stems"}
+          aria-controls={panel === "stems" ? panelId : undefined}
           disabled={busy || !supportsStems}
-          title={
-            supportsStems
-              ? "Pull one instrument or voice out on its own"
-              : "Needs the detailed sound model"
-          }
+          aria-describedby={!supportsStems ? `stem-need-${track.id}` : undefined}
+          title={supportsStems ? "Pull one instrument or voice out on its own" : undefined}
         >
           Separate parts
         </button>
@@ -93,12 +93,10 @@ export default function Derive({
           className="btn btn-icon"
           onClick={() => setPanel(panel === "layer" ? null : "layer")}
           aria-expanded={panel === "layer"}
+          aria-controls={panel === "layer" ? panelId : undefined}
           disabled={busy || !supportsStems}
-          title={
-            supportsStems
-              ? "Play a new instrument on top of the song as it is"
-              : "Needs the detailed sound model"
-          }
+          aria-describedby={!supportsStems ? `stem-need-${track.id}` : undefined}
+          title={supportsStems ? "Play a new instrument on top of the song as it is" : undefined}
         >
           Add an instrument
         </button>
@@ -107,6 +105,7 @@ export default function Derive({
           className="btn btn-icon"
           onClick={() => setPanel(panel === "extend" ? null : "extend")}
           aria-expanded={panel === "extend"}
+          aria-controls={panel === "extend" ? panelId : undefined}
           disabled={busy}
         >
           Make longer
@@ -116,6 +115,7 @@ export default function Derive({
           className="btn btn-icon"
           onClick={() => setPanel(panel === "shorten" ? null : "shorten")}
           aria-expanded={panel === "shorten"}
+          aria-controls={panel === "shorten" ? panelId : undefined}
           disabled={busy}
           title="Keep only part of this song — instant, and it doesn't re-record anything"
         >
@@ -126,6 +126,7 @@ export default function Derive({
           className="btn btn-icon"
           onClick={() => setPanel(panel === "cover" ? null : "cover")}
           aria-expanded={panel === "cover"}
+          aria-controls={panel === "cover" ? panelId : undefined}
           disabled={busy}
         >
           Change the style
@@ -135,6 +136,7 @@ export default function Derive({
           className="btn btn-icon"
           onClick={() => setPanel(panel === "section" ? null : "section")}
           aria-expanded={panel === "section"}
+          aria-controls={panel === "section" ? panelId : undefined}
           disabled={busy}
           title="Regenerate just one part, keeping the rest"
         >
@@ -145,6 +147,7 @@ export default function Derive({
           className="btn btn-icon"
           onClick={() => setPanel(panel === "more" ? null : "more")}
           aria-expanded={panel === "more"}
+          aria-controls={panel === "more" ? panelId : undefined}
           disabled={busy}
           title="A new song in the same style"
         >
@@ -152,8 +155,15 @@ export default function Derive({
         </button>
       </div>
 
+      {!supportsStems && (
+        <p className="hint" id={`stem-need-${track.id}`}>
+          Separating parts and adding an instrument need the detailed sound model,
+          which this download doesn't include.
+        </p>
+      )}
+
       {panel === "more" && (
-        <div className="derive-panel">
+        <div className="derive-panel" id={panelId}>
           <p className="hint" style={{ marginTop: 0 }}>
             Makes a new song with this one's style, tempo, key and singer — so a
             set of songs can hang together. Everything you have stays as it is.
@@ -196,7 +206,7 @@ export default function Derive({
       )}
 
       {panel === "shorten" && (
-        <div className="derive-panel">
+        <div className="derive-panel" id={panelId}>
           <p className="hint" style={{ marginTop: 0 }}>
             Keeps the part you choose as a new song, and leaves this one alone.
             This one is instant — it copies the sound you already have instead of
@@ -255,7 +265,7 @@ export default function Derive({
       )}
 
       {panel === "section" && (
-        <div className="derive-panel">
+        <div className="derive-panel" id={panelId}>
           <p className="hint" style={{ marginTop: 0 }}>
             Keeps the whole song and rewrites only the part you choose — handy when
             one verse doesn't land but the rest does.
@@ -326,7 +336,7 @@ export default function Derive({
       )}
 
       {panel === "stems" && (
-        <div className="derive-panel">
+        <div className="derive-panel" id={panelId}>
           <div className="field">
             <label htmlFor={`stem-${track.id}`}>Which part do you want on its own?</label>
             <select
@@ -357,7 +367,7 @@ export default function Derive({
       )}
 
       {panel === "layer" && (
-        <div className="derive-panel">
+        <div className="derive-panel" id={panelId}>
           <div className="field">
             <label htmlFor={`layer-${track.id}`}>What should join in?</label>
             <select
@@ -403,7 +413,7 @@ export default function Derive({
       )}
 
       {panel === "extend" && (
-        <div className="derive-panel">
+        <div className="derive-panel" id={panelId}>
           <div className="field">
             <label htmlFor={`ext-${track.id}`}>
               How much longer? {extendBy} seconds
@@ -433,7 +443,7 @@ export default function Derive({
       )}
 
       {panel === "cover" && (
-        <div className="derive-panel">
+        <div className="derive-panel" id={panelId}>
           <div className="field">
             <label htmlFor={`cov-${track.id}`}>What should it sound like instead?</label>
             <input

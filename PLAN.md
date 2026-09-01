@@ -261,8 +261,8 @@ Repaint a section, extend a track, generate a cover (all native), stems via Demu
 Lineage tree in the library UI.
 
 ### Phase 4 — Accessibility audit + packaging
-- **Packaging (Linux):** AppImage, `.deb`, and a local Flatpak wrap of the `.deb`. `scripts/package.sh` stages the real engine (and refuses the setup.sh placeholder), does not ship model weights, and verifies the bundles. See the README. Accessibility audit is a separate pass — not done here.
-- Full keyboard and screen-reader pass, contrast audit, polished first-run experience.
+- **Packaging (Linux):** AppImage, `.deb`, and a local Flatpak wrap of the `.deb`. `scripts/package.sh` stages the real engine (and refuses the setup.sh placeholder), does not ship model weights, and verifies the bundles. See the README.
+- **Accessibility audit:** one window-level live region announces generation start, each stage, and completion (the ticking timer is visual-only, so it no longer re-reads every second). Keyboard focus uses a 3:1 outline; tablists and the setup size group move with arrows; icon-only transport controls keep accessible names; shuffle/repeat are labelled in words. Control borders meet WCAG 1.4.11. Larger text is a remembered preference. `prefers-reduced-motion` disables animation. Follow-along lyrics still do not announce per line.
 
 ### Phase 5 — The shell around the model
 

@@ -3,15 +3,16 @@
  * Warm rather than clinical — this is a tool for making music, not filing taxes.
  * Every colour pair here clears WCAG AA. Accessibility is a build constraint,
  * not a later pass: focus is always visible, motion is always optional, and
- * nothing communicates by colour alone.
+ * nothing communicates by colour alone. Control borders meet 3:1 against the
+ * surface they sit on (WCAG 1.4.11).
  */
 
 :root {
   --bg: #14110f;
   --surface: #1e1a17;
   --surface-2: #272220;
-  --border: #3a3330;
-  --border-strong: #554b46;
+  --border: #6a5f58;        /* 3.0:1 on --bg — cards stay visible */
+  --border-strong: #7a6e66; /* 3.5:1 on --surface — inputs and buttons */
 
   --text: #f5f0ea;
   --text-dim: #b6aca4;   /* 7.1:1 on --bg */
@@ -56,23 +57,38 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Larger-text preference, toggled in the UI. */
-body.text-large { font-size: 19px; }
+/* Larger-text preference, toggled in the UI and remembered on this machine. */
+body.text-large { font-size: 22px; }
 
-/* --- focus: always visible, never removed ------------------------------- */
-:focus { outline: none; }
-:focus-visible {
+/* --- focus: always visible for keyboard, never for a mouse click ---------- */
+:focus {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+:focus:not(:focus-visible) {
   outline: none;
+  box-shadow: none;
+}
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
   box-shadow: var(--focus);
   border-radius: 6px;
+}
+
+@media (forced-colors: active) {
+  :focus-visible {
+    outline: 3px solid Highlight;
+    box-shadow: none;
+  }
 }
 
 /* --- motion ------------------------------------------------------------- */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
   }
 }
 
@@ -90,7 +106,7 @@ body.text-large { font-size: 19px; }
 /* Skip link — first tab stop. */
 .skip-link {
   position: absolute;
-  left: -9999px;
+  left: 0.75rem;
   top: 0;
   z-index: 100;
   background: var(--accent);
@@ -98,9 +114,14 @@ body.text-large { font-size: 19px; }
   padding: 12px 18px;
   border-radius: 0 0 var(--radius) 0;
   font-weight: 600;
+  transform: translateY(-120%);
 }
-.skip-link:focus {
-  left: 0;
+.skip-link:focus,
+.skip-link:focus-visible {
+  transform: translateY(0);
+  outline: 3px solid var(--accent-ink);
+  outline-offset: 2px;
+  box-shadow: none;
 }
 
 /* --- layout ------------------------------------------------------------- */
@@ -162,6 +183,11 @@ body.text-large { font-size: 19px; }
 }
 
 .panel { flex: 1; overflow-y: auto; padding-bottom: 40px; }
+/* Programmatic focus after a song lands — don't draw a ring around the page. */
+#panel-library:focus {
+  outline: none;
+  box-shadow: none;
+}
 
 /* --- create ------------------------------------------------------------- */
 .create-intro {
@@ -832,46 +858,9 @@ audio { width: 100%; margin-top: 13px; }
 }
 .follow-line.instrumental { font-style: italic; }
 
-@media (prefers-reduced-motion: reduce) {
-  .follow-line { transition: none; }
+.player-seek input[type="range"] {
+  max-width: none;
 }
-
-/* Range inputs are drawn entirely by the platform otherwise, which on a dark
-   surface means a near-invisible grey track. */
-input[type="range"] {
-  appearance: none;
-  width: 100%;
-  height: 22px;
-  background: transparent;
-  cursor: pointer;
-}
-input[type="range"]::-webkit-slider-runnable-track {
-  height: 5px;
-  border-radius: 3px;
-  background: var(--border-strong);
-}
-input[type="range"]::-webkit-slider-thumb {
-  appearance: none;
-  width: 15px;
-  height: 15px;
-  margin-top: -5px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 0;
-}
-input[type="range"]::-moz-range-track {
-  height: 5px;
-  border-radius: 3px;
-  background: var(--border-strong);
-}
-input[type="range"]::-moz-range-thumb {
-  width: 15px;
-  height: 15px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 0;
-}
-
 
 /* --- saved voices (personas) --------------------------------------------
  *

@@ -1,18 +1,15 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  STAGE_LABELS,
+  generationFinished,
+  generationProgress,
+  generationStarted,
+  useAnnounce,
+} from "../a11y";
 import { api, onEvent } from "../api";
 import { isDesktop, runPreviewGeneration } from "../preview";
 import Studio, { studioToOptions, type StudioValues } from "./Studio";
 import type { Persona, StageEvent, Track } from "../types";
-
-/** Plain-language labels. No jargon — the person using this may not make music. */
-const STAGE_TEXT: Record<string, string> = {
-  starting: "Warming up",
-  composing: "Composing the music",
-  writing: "Writing the words and melody",
-  rendering: "Recording the audio",
-  recovering: "Adjusting for your computer",
-  saving: "Saving to your library",
-};
 
 interface Props {
   onCreated: (t: Track) => void;
@@ -55,6 +52,8 @@ export default function Create({
   });
   const jobRef = useRef<string | null>(null);
   const lyricsRef = useRef<HTMLTextAreaElement>(null);
+  const progressRef = useRef<HTMLDivElement>(null);
+  const announce = useAnnounce();
 
   // Seed the language picker from the user's locale. Without an explicit
   // language the model invents one, which is how an English reggae prompt came
@@ -73,6 +72,11 @@ export default function Create({
     if (!busy) return;
     const t = setInterval(() => setElapsed((e) => e + 1), 1000);
     return () => clearInterval(t);
+  }, [busy]);
+
+  useEffect(() => {
+    if (!busy) return;
+    progressRef.current?.scrollIntoView({ block: "nearest" });
   }, [busy]);
 
   useEffect(() => {
@@ -125,16 +129,19 @@ export default function Create({
     setElapsed(0);
     setStage("starting");
     setDetail("");
+    announce(generationStarted());
 
     if (!isDesktop) {
       runPreviewGeneration(
         (s, d) => {
           setStage(s);
           setDetail(d);
+          announce(generationProgress(s, d));
         },
         (t) => {
           setBusy(false);
           setStage(null);
+          announce(generationFinished(t.title));
           onCreated(t);
         },
       );
@@ -167,7 +174,7 @@ export default function Create({
         the key and tempo, and records it on your computer.
       </p>
 
-      <form onSubmit={submit}>
+      <form onSubmit={submit} aria-busy={busy}>
         <div className="field">
           <label htmlFor="prompt">What should the song be like?</label>
           <textarea
@@ -286,6 +293,19 @@ export default function Create({
           </div>
         )}
 
+        {/* Visual only — the window-level live region speaks the same stages
+            without the ticking elapsed timer. */}
+        {busy && stage && (
+          <div className="progress" ref={progressRef}>
+            <div className="progress-head">
+              <span className="pulse" aria-hidden="true" />
+              <span>{STAGE_LABELS[stage] ?? "Working"}</span>
+            </div>
+            {detail && <p className="progress-detail">{detail}</p>}
+            <p className="progress-elapsed">{elapsed}s elapsed</p>
+          </div>
+        )}
+
         <div className="btn-row">
           <button
             type="submit"
@@ -297,20 +317,6 @@ export default function Create({
           {!engineReady && !busy && <span className="hint">Starting the engine…</span>}
         </div>
       </form>
-
-      {/* Announced politely so screen-reader users hear each step as it happens. */}
-      <div aria-live="polite" aria-atomic="true">
-        {busy && stage && (
-          <div className="progress">
-            <div className="progress-head">
-              <span className="pulse" aria-hidden="true" />
-              <span>{STAGE_TEXT[stage] ?? "Working"}</span>
-            </div>
-            {detail && <p className="progress-detail">{detail}</p>}
-            <p className="progress-elapsed">{elapsed}s elapsed</p>
-          </div>
-        )}
-      </div>
 
       {error && (
         <div className="notice notice-err" role="alert">
