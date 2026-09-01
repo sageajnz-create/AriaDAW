@@ -1,0 +1,88 @@
+# Local Flatpak wrap of the Aria .deb.
+#
+# Tauri does not produce a Flatpak itself. This manifest unpacks the .deb that
+# `scripts/package.sh` already built and installs it under /app, with the
+# permissions Aria actually needs:
+#   - a window (Wayland, with X11 fallback)
+#   - the GPU (Vulkan compute for the engine, via DRI)
+#   - the network, once, for the first-run model download and for a host
+#     Ollama lyric writer on localhost
+#   - your Music folder (that's where Aria saves songs)
+#
+# This is not a Flathub listing. Flathub wants a from-source build with
+# vendored crates and npm, which is a different project.
+#
+# Built by: ./scripts/package.sh   (or  ./scripts/package.sh --flatpak-only)
+#
+# Runtime 48 matches the GNOME platform Tauri's Flatpak docs are based on,
+# plus one stable series. Bump both numbers together if you update.
+
+id: org.aria.music
+runtime: org.gnome.Platform
+runtime-version: "48"
+sdk: org.gnome.Sdk
+command: aria
+finish-args:
+  - --share=ipc
+  - --share=network
+  - --socket=fallback-x11
+  - --socket=wayland
+  - --socket=pulseaudio
+  - --device=dri
+  - --filesystem=xdg-music
+  - --filesystem=xdg-download
+  - --filesystem=xdg-documents
+  # VRAM detection reads amdgpu's sysfs node. Without this, Aria falls back
+  # to the Standard model tier instead of picking Best on an 8 GB card.
+  - --filesystem=/sys/class/drm:ro
+modules:
+  - name: aria
+    buildsystem: simple
+    sources:
+      # Copied next to this file by scripts/package.sh before flatpak-builder runs.
+      - type: file
+        path: aria.deb
+      - type: file
+        path: ../org.aria.music.metainfo.xml
+    build-commands:
+      - |
+        set -e
+        mkdir -p deb-extract
+        ( cd deb-extract && ar x ../aria.deb )
+        if [ -f deb-extract/data.tar.zst ]; then
+          tar -C deb-extract -xf deb-extract/data.tar.zst
+        elif [ -f deb-extract/data.tar.xz ]; then
+          tar -C deb-extract -xf deb-extract/data.tar.xz
+        else
+          tar -C deb-extract -xf deb-extract/data.tar.gz
+        fi
+        install -Dm755 deb-extract/usr/bin/aria /app/bin/aria
+        install -Dm755 deb-extract/usr/bin/ace-server /app/bin/ace-server
+        if [ -d deb-extract/usr/lib/Aria ]; then
+          mkdir -p /app/lib/Aria
+          cp -a deb-extract/usr/lib/Aria/. /app/lib/Aria/
+        fi
+        desk=$(find deb-extract/usr/share/applications -name '*.desktop' | head -1)
+        sed -i 's/^Icon=.*/Icon=org.aria.music/' "$desk"
+        sed -i 's|^Exec=.*|Exec=aria|' "$desk"
+        install -Dm644 "$desk" /app/share/applications/org.aria.music.desktop
+        if [ -d deb-extract/usr/share/icons ]; then
+          mkdir -p /app/share/icons
+          cp -a deb-extract/usr/share/icons/. /app/share/icons/
+          find /app/share/icons -type f -name 'Aria.*' | while read -r f; do
+            d=$(dirname "$f")
+            ext="${f##*.}"
+            cp -a "$f" "$d/org.aria.music.$ext"
+          done
+        fi
+        install -Dm644 org.aria.music.metainfo.xml /app/share/metainfo/org.aria.music.metainfo.xml
+        sed -i 's/Aria.desktop/org.aria.music.desktop/' /app/share/metainfo/org.aria.music.metainfo.xml
+        if grep -a -F -q aria-dev-placeholder /app/bin/ace-server; then
+          echo "placeholder engine in Flatpak" >&2
+          exit 1
+        fi
+        test -x /app/bin/ace-server
+        if find /app \( -name '*.gguf' -o -name '*.safetensors' \) | grep -q .; then
+          echo "model weights must not ship in the Flatpak" >&2
+          exit 1
+        fi

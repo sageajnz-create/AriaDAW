@@ -120,8 +120,15 @@ fi
 # tauri-build refuses to build at all when an externalBin named in
 # tauri.conf.json is absent, so a checkout with no engine can't even run the
 # Rust tests. Stage whatever we have under the target-triple name it wants.
+# On Windows Tauri also requires the `.exe` suffix — without it, `cargo test`
+# looks for `ace-server-$triple.exe` and fails even though the placeholder
+# is sitting there without the extension. (Linux CI never saw this; Windows
+# CI on master has been failing on it.)
 TRIPLE="$(rustc -vV | awk '/^host:/ {print $2}')"
 SIDECAR="src-tauri/binaries/ace-server-${TRIPLE}"
+case "$TRIPLE" in
+    *-windows-*) SIDECAR="${SIDECAR}.exe" ;;
+esac
 mkdir -p src-tauri/binaries
 if [ -x engine/acestep.cpp/build-static/ace-server ]; then
     cp engine/acestep.cpp/build-static/ace-server "$SIDECAR"

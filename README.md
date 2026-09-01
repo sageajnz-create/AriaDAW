@@ -83,6 +83,41 @@ sudo apt install gstreamer1.0-plugins-good   # Debian / Ubuntu
 
 In active development. See [PLAN.md](PLAN.md) for the architecture and roadmap.
 
+## Linux packages
+
+Aria on Linux is an **AppImage**, a **.deb**, and (if you have the tools) a **Flatpak**. The music model is not inside any of them — several gigabytes, downloaded the first time you open the app.
+
+One command, from a Linux checkout:
+
+```bash
+./scripts/package.sh
+```
+
+That builds the real engine (not the placeholder `scripts/setup.sh` writes for development), then the packages. They land in:
+
+- `src-tauri/target/release/bundle/deb/*.deb`
+- `src-tauri/target/release/bundle/appimage/*.AppImage`
+- `packaging/aria-0.1.0.flatpak`  — only if `flatpak-builder` and GNOME Platform 48 are installed
+
+Install / run:
+
+```bash
+# Debian / Ubuntu
+sudo apt install ./src-tauri/target/release/bundle/deb/*.deb
+
+# AppImage (any distro)
+chmod +x src-tauri/target/release/bundle/appimage/*.AppImage
+./src-tauri/target/release/bundle/appimage/*.AppImage
+
+# Flatpak (after package.sh built one)
+flatpak install --user packaging/aria-0.1.0.flatpak
+flatpak run org.aria.music
+```
+
+If Flatpak was skipped, the script prints the exact packages to install and you can wrap an existing .deb with `./scripts/package.sh --flatpak-only`. Tauri cannot produce a Flatpak itself; the Flatpak is that .deb, unpacked into the sandbox.
+
+Debian/Ubuntu build dependencies are listed at the top of `scripts/package.sh`. CI on GitHub runs `./scripts/package.sh --layout-check`, which uses a dummy engine to prove the .deb *layout* is right without compiling acestep.cpp.
+
 ## License
 
 Aria is MIT licensed. It builds on ACE-Step 1.5 (MIT) and acestep.cpp (MIT).
