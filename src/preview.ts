@@ -111,28 +111,54 @@ export const previewStatus: EngineStatus = {
 };
 
 /** Walks the real stage sequence so progress and announcements can be checked. */
+const previewTimerSlot = "__ariaPreviewTimers" as const;
+
+export const PREVIEW_STAGE_SCRIPT: Array<[string, string, number]> = [
+  ["starting", "Waking the engine", 700],
+  ["writing", "Writing the song", 3000],
+  ["rendering", "Recording the audio", 3500],
+  ["saving", "Saving to your library", 600],
+];
+/** Pause before the first stage so "Making your song." can be spoken. */
+export const PREVIEW_START_DELAY_MS = 400;
+
+function cancelPreviewTimers() {
+  if (typeof window === "undefined") return;
+  const w = window as Window & { [previewTimerSlot]?: number[] };
+  (w[previewTimerSlot] ?? []).forEach((id) => clearTimeout(id));
+  w[previewTimerSlot] = [];
+}
+
+cancelPreviewTimers();
+
 export function runPreviewGeneration(
   emit: (stage: string, detail: string) => void,
   done: (t: Track) => void,
 ): void {
-  const script: Array<[string, string, number]> = [
-    ["starting", "Waking the engine", 700],
-    ["writing", "Writing the song", 3000],
-    ["rendering", "Recording the audio", 3500],
-    ["saving", "Saving to your library", 600],
-  ];
-  let delay = 0;
+  // Stored on `window` so a Vite HMR refresh can still cancel timers from the
+  // previous module instance — a module-level array would be replaced empty
+  // and the old `done` callback would still fire a second later.
+  cancelPreviewTimers();
+  const w = window as Window & { [previewTimerSlot]?: number[] };
+  w[previewTimerSlot] = [];
+
+  const script = PREVIEW_STAGE_SCRIPT;
+  // First stage is delayed so "Making your song." can be announced before
+  // "Warming up" — a 0ms first emit ate the start message in the live region.
+  let delay = PREVIEW_START_DELAY_MS;
   for (const [stage, detail, ms] of script) {
-    setTimeout(() => emit(stage, detail), delay);
+    w[previewTimerSlot]!.push(window.setTimeout(() => emit(stage, detail), delay));
     delay += ms;
   }
-  setTimeout(() => {
-    done({
-      ...previewTracks[0],
-      id: `preview-${Date.now()}`,
-      title: "Your new song",
-      created_at: Math.floor(Date.now() / 1000),
-      favorite: false,
-    });
-  }, delay);
+  w[previewTimerSlot]!.push(
+    window.setTimeout(() => {
+      done({
+        ...previewTracks[0],
+        id: `preview-${Date.now()}`,
+        title: "Your new song",
+        created_at: Math.floor(Date.now() / 1000),
+        favorite: false,
+      });
+    }, delay),
+  );
 }

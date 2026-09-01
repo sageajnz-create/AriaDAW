@@ -16,6 +16,7 @@ import {
   setupProgressKey,
   setupProgressMessage,
 } from "../a11y";
+import { PREVIEW_STAGE_SCRIPT, PREVIEW_START_DELAY_MS } from "../preview";
 
 describe("generation live messages", () => {
   it("announces start, each named stage, and completion in plain language", () => {
@@ -139,4 +140,13 @@ describe("palette contrast", () => {
   pair("control borders on cards", "border-strong", "surface", AA_UI);
   pair("card borders on background", "border", "bg", AA_UI);
   pair("focus colour on background", "accent", "bg", AA_UI);
+});
+
+describe("preview generation pacing", () => {
+  it("holds long enough that start, stages, and done can all be announced", () => {
+    const total =
+      PREVIEW_START_DELAY_MS + PREVIEW_STAGE_SCRIPT.reduce((sum, [, , ms]) => sum + ms, 0);
+    expect(total).toBeGreaterThanOrEqual(8000);
+    expect(PREVIEW_START_DELAY_MS).toBeGreaterThan(0);
+  });
 });

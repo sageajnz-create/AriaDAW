@@ -106,7 +106,7 @@ body.text-large { font-size: 22px; }
 /* Skip link — first tab stop. */
 .skip-link {
   position: absolute;
-  left: -9999px;
+  left: 0.75rem;
   top: 0;
   z-index: 100;
   background: var(--accent);
@@ -114,10 +114,11 @@ body.text-large { font-size: 22px; }
   padding: 12px 18px;
   border-radius: 0 0 var(--radius) 0;
   font-weight: 600;
+  transform: translateY(-120%);
 }
 .skip-link:focus,
 .skip-link:focus-visible {
-  left: 0;
+  transform: translateY(0);
   outline: 3px solid var(--accent-ink);
   outline-offset: 2px;
   box-shadow: none;

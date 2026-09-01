@@ -18,15 +18,25 @@ const AnnounceContext = createContext<Announce>(() => {});
 export function Announcer({ children }: { children: ReactNode }) {
   const [message, setMessage] = useState("");
   const timer = useRef<number>(0);
+  const last = useRef("");
 
   const announce = useCallback<Announce>((text) => {
     const next = text.trim();
     if (!next) return;
     window.clearTimeout(timer.current);
-    // Clearing first is what lets the same sentence be spoken twice in a row
-    // (two songs in one sitting, two files in setup).
-    setMessage("");
-    timer.current = window.setTimeout(() => setMessage(next), 40);
+    if (next === last.current) {
+      // Same sentence twice in a row (two songs, two setup files) needs a
+      // clear so the live region fires again. Different sentences do not —
+      // clearing in between made screen readers announce a blank gap.
+      setMessage("");
+      timer.current = window.setTimeout(() => {
+        last.current = next;
+        setMessage(next);
+      }, 40);
+      return;
+    }
+    last.current = next;
+    setMessage(next);
   }, []);
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
