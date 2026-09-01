@@ -148,6 +148,9 @@ build_flatpak() {
         echo "     sudo flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo"
         echo "     flatpak install flathub org.gnome.Platform//48 org.gnome.Sdk//48"
         echo "     ./scripts/package.sh --flatpak-only"
+        if [ "$FLATPAK_ONLY" = 1 ]; then
+            exit 1
+        fi
         return 0
     fi
     if ! flatpak info org.gnome.Platform//48 >/dev/null 2>&1; then
@@ -155,6 +158,9 @@ build_flatpak() {
         echo "!! Skipping Flatpak — org.gnome.Platform//48 is not installed."
         echo "     flatpak install flathub org.gnome.Platform//48 org.gnome.Sdk//48"
         echo "     ./scripts/package.sh --flatpak-only"
+        if [ "$FLATPAK_ONLY" = 1 ]; then
+            exit 1
+        fi
         return 0
     fi
 
